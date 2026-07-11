@@ -36,6 +36,20 @@ import {
 import "../styles/chat.css";
 import "../styles/evaluation.css";
 
+// --- pending character preselection ----------------------------------------
+// PlazaStage's actor popover ("会話する" on my own characters) and CatalogView's
+// import-success CTA want to land here with a specific character already in
+// the conversation, without threading a prop through app.tsx's view-switch
+// plumbing (app.tsx/lib/navigation.ts are off-limits — see requestNavigate).
+// Same one-shot module-level handoff pattern as CatalogView's
+// setPendingCatalogShareCid: the caller sets this right before requestNavigate,
+// and ChatView consumes it exactly once on mount below.
+let pendingChatCharacterId: string | null = null;
+
+export function setPendingChatCharacterId(id: string | null): void {
+  pendingChatCharacterId = id;
+}
+
 // Deterministic accent color per speaker so each character reads consistently
 // across the transcript. The user gets the brand accent.
 const SPEAKER_HUES = [212, 152, 22, 280, 340, 48, 190, 110];
@@ -109,6 +123,22 @@ export function ChatView() {
     refreshSessions();
     setActiveId(session.id);
   };
+
+  // Consume a pending character preselection (set by PlazaStage/CatalogView
+  // right before requestNavigate('chat')) exactly once: start a fresh
+  // session with that character already seated, rather than dumping the user
+  // into whatever session happened to be first. Ignored if the character was
+  // removed between the click and this mount.
+  useEffect(() => {
+    if (!pendingChatCharacterId) return;
+    const characterId = pendingChatCharacterId;
+    pendingChatCharacterId = null;
+    if (!listCharacters().some((c) => c.id === characterId)) return;
+    const session = createSession(undefined, [characterId]);
+    refreshSessions();
+    setActiveId(session.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleDeleteSession = (id: string) => {
     deleteSession(id);

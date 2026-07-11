@@ -1,14 +1,21 @@
-// Backup export/import for tc-town's local data: characters (with image
-// avatar bytes embedded, but VRM avatars referenced by checksum only — VRM
-// files are multi-megabyte and already live in the shared VRM library, so
-// embedding them would bloat every export), app appearance settings, and
-// tc-town's (now much smaller) local provider settings — network
-// consumer/provider toggles and the STT silence duration. Everything
-// round-trips as one JSON file via the Settings screen ("full backup"), and a
-// single character can also be exported/imported on its own from the
-// Characters screen as a lightweight one-character bundle sharing the same
-// `characters` array shape (so both files — and tc-assistant2's importer —
-// can be read by the same code).
+// Full-bundle build plus single-character export/import for tc-town's local
+// data: characters (with image avatar bytes embedded, but VRM avatars
+// referenced by checksum only — VRM files are multi-megabyte and already
+// live in the shared VRM library, so embedding them would bloat every
+// export), app appearance settings, and tc-town's (now much smaller) local
+// provider settings — network consumer/provider toggles and the STT silence
+// duration.
+//
+// The full bundle (buildExportBundle) is no longer a manual Settings-screen
+// download — it's continuously auto-published to tc-storage's drive over the
+// shared bus's "town-backup" topic (see lib/townBackupPublisher.ts). A full
+// bundle file is still importable, though: a single character can be
+// exported/imported on its own from the Characters screen as a lightweight
+// one-character bundle sharing the same `characters` array shape, and that
+// same importer (parseCharacterImport) also accepts a full backup bundle
+// wholesale (importing every character it contains) — so re-importing a
+// town-backup export, or a file downloaded from tc-storage's drive, is the
+// restore path.
 //
 // LLM/TTS/STT connection info (baseUrl/apiKey/model) is NOT part of this
 // bundle: it lives in the shared `tc-shared-llm-config-v1` key
@@ -20,8 +27,8 @@
 // on import — if the same VRM isn't present there, the character imports
 // without its avatar rather than failing the whole import.
 
-import { sanitizeAppSettings, type AppSettings } from "./appSettings";
-import { sanitizeSettings, type ProviderSettings } from "./llmSettings";
+import type { AppSettings } from "./appSettings";
+import type { ProviderSettings } from "./llmSettings";
 import { coerceCharacter, saveCharacter, listCharacters } from "./characterStorage";
 import { coerceWorld, getWorld, listWorlds, saveWorld, type WorldSetting } from "./worlds";
 import { getBlob, putBlob } from "./idbBlobStore";
@@ -125,21 +132,6 @@ export async function buildExportBundle(
   };
 }
 
-/** Triggers a browser download of the bundle as a formatted `.json` file. */
-export function downloadExportBundle(bundle: ExportBundle): void {
-  const json = JSON.stringify(bundle, null, 2);
-  const blob = new Blob([json], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const dateStamp = bundle.exportedAt.slice(0, 10);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `tc-town-backup-${dateStamp}.json`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
 /** Builds a lightweight one-character export file (avatar included, VRM by reference only). Includes the character's selected world setting, if any. */
 export async function buildCharacterExportFile(character: Character): Promise<CharacterExportFile> {
   const world = getWorld(character.worldId);
@@ -175,28 +167,6 @@ function hasCharactersArrayShape(value: unknown): value is Record<string, unknow
   if (!value || typeof value !== "object") return false;
   const v = value as Record<string, unknown>;
   return v.app === BUNDLE_APP_ID && Array.isArray(v.characters);
-}
-
-/** Parses and lightly sanitizes a bundle JSON string. Throws a user-facing message on invalid input. */
-export function parseExportBundle(raw: string): ExportBundle {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error("JSONの解析に失敗しました。ファイルが壊れている可能性があります。");
-  }
-  if (!hasCharactersArrayShape(parsed) || typeof parsed.version !== "number") {
-    throw new Error("TC Townのバックアップファイルとして認識できませんでした。");
-  }
-  return {
-    app: BUNDLE_APP_ID,
-    version: parsed.version,
-    exportedAt: typeof parsed.exportedAt === "string" ? parsed.exportedAt : new Date().toISOString(),
-    appSettings: sanitizeAppSettings(parsed.appSettings),
-    providerSettings: sanitizeSettings(parsed.providerSettings),
-    characters: parsed.characters as ExportedCharacter[],
-    worlds: sanitizeWorldsField(parsed.worlds),
-  };
 }
 
 /** Defensively sanitizes an optional `worlds` field found on either bundle shape — malformed entries are dropped rather than failing the whole parse. */
@@ -340,10 +310,4 @@ export function importWorldSettings(list: WorldSetting[]): number {
     count += 1;
   }
   return count;
-}
-
-/** Imports every world setting and character in a full backup bundle (worlds first, so characters' `worldId` resolves immediately). See {@link importExportedCharacters}. */
-export async function importCharacters(bundle: ExportBundle): Promise<ImportCharactersResult> {
-  importWorldSettings(bundle.worlds);
-  return importExportedCharacters(bundle.characters);
 }

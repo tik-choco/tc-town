@@ -1,0 +1,423 @@
+/* Plaza stage — the "town square" strip at the top of ひろば (CatalogView)
+   where up to 4 actors stand and can be nudged into an ambient
+   conversation. See views/PlazaStage.tsx. Shares design tokens + .cat-panel/
+   .cat-btn/.cat-badge/etc from catalog.css (PlazaStage only ever renders
+   inside CatalogView). */
+
+.cat-plaza {
+  gap: var(--space-3);
+}
+
+.cat-plaza-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+}
+
+.cat-plaza-head h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--text-h);
+}
+
+.cat-plaza-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.cat-plaza-hint {
+  max-width: 32ch;
+  text-align: right;
+}
+
+/* Ambient turn-progress: a row of small dots rather than a developer-y
+   "3/8" counter — filled in left-to-right as lines land, unfilled ones stay
+   a faint outline. Kept deliberately understated (small, muted) so it reads
+   as ambient texture, not a stat readout. */
+.cat-plaza-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cat-plaza-progress-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: background-color var(--dur-fast) var(--ease);
+}
+
+.cat-plaza-progress-dot--filled {
+  background: var(--accent);
+}
+
+/* --- おしゃべり終了状態 -------------------------------------------------------- */
+
+.cat-plaza-ended {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.cat-plaza-ended-text {
+  font-size: 0.78rem;
+  color: var(--text-subtle);
+  white-space: nowrap;
+}
+
+/* --- 会話ログ ------------------------------------------------------------------ */
+
+.cat-plaza-log {
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.cat-plaza-log-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.cat-plaza-log-entry {
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text-h);
+}
+
+.cat-plaza-log-name {
+  font-weight: 600;
+  margin-right: var(--space-1);
+}
+
+.cat-plaza-log-name::after {
+  content: "：";
+}
+
+.cat-plaza-log-text {
+  color: var(--text-subtle);
+}
+
+/* The stage floor: a soft sky-to-ground gradient the busts stand on.
+   padding-top reserves headroom for the speech bubble (which is absolutely
+   positioned above each avatar) so it stays inside this box instead of
+   poking out above it — if it did, it'd get clipped/hidden by the scroll
+   containers further up the tree (.cat-root, .tc-town-main both clip
+   overflow). overflow stays visible as a fallback for the rare bubble that
+   still doesn't fit (see .cat-plaza-bubble's line-clamp for the normal case). */
+.cat-plaza-scene {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-evenly;
+  gap: var(--space-3);
+  /* min-height only matters before actors are mounted (empty/loading state)
+     — once actors render, the taller full-body avatars grow the box past
+     this floor on their own. padding-top is independent of avatar height:
+     it's the fixed headroom the speech bubble (position: absolute;
+     bottom: 100% of .cat-plaza-slot) occupies above the slot's own
+     (auto-sized, border-box) content box — see .cat-plaza-bubble below. */
+  min-height: 220px;
+  padding: 108px var(--space-4) var(--space-4);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(
+    to bottom,
+    var(--accent-bg) 0%,
+    var(--surface-2) 62%,
+    var(--surface-3) 100%
+  );
+  border: 1px solid var(--border);
+  overflow: visible;
+}
+
+.cat-plaza-scene .cat-empty-state {
+  width: 100%;
+}
+
+.cat-plaza-slot {
+  appearance: none;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 140px;
+}
+
+.cat-plaza-avatar-wrap {
+  display: block;
+  animation: cat-plaza-bob 3.6s ease-in-out infinite;
+}
+
+/* Stagger the idle bob per slot so the stage doesn't move in lockstep. */
+.cat-plaza-slot:nth-child(2) .cat-plaza-avatar-wrap {
+  animation-delay: -0.9s;
+}
+.cat-plaza-slot:nth-child(3) .cat-plaza-avatar-wrap {
+  animation-delay: -1.8s;
+}
+.cat-plaza-slot:nth-child(4) .cat-plaza-avatar-wrap {
+  animation-delay: -2.7s;
+}
+
+@keyframes cat-plaza-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+/* imageDataUrl actors render a raw <img> (see ActorStageAvatar) rather than
+   CharacterAvatar, so their footprint is set directly here — kept in the
+   same full-body-ish proportions (~56-72px wide, ~140px tall) as the
+   CharacterAvatar `framing="full"` VRM/placeholder actors next to them on
+   the stage, so the lineup doesn't look mismatched. */
+.cat-plaza-avatar {
+  width: 60px;
+  height: 140px;
+}
+
+.cat-plaza-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-h);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cat-plaza-mine-badge {
+  font-size: 0.6rem;
+  padding: 1px 5px;
+}
+
+/* --- Speech bubbles -------------------------------------------------------------- */
+
+.cat-plaza-bubble {
+  /* --plaza-bubble-x/--plaza-bubble-scale let the edge-slot overrides below
+     swap in edge-anchored positioning without duplicating the whole
+     transform/animation — see :first-child/:last-child rules. */
+  --plaza-bubble-x: -50%;
+  --plaza-bubble-scale: 1;
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  left: 50%;
+  transform: translateX(var(--plaza-bubble-x)) scale(var(--plaza-bubble-scale));
+  transform-origin: bottom center;
+  width: max-content;
+  max-width: min(180px, calc(50vw - var(--space-5)));
+  min-width: 64px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-2);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text-h);
+  text-align: left;
+  z-index: 2;
+  /* Bounds bubble height so it reliably fits inside the scene's reserved
+     top padding even for a long streamed line — see .cat-plaza-scene. */
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  animation: cat-plaza-bubble-in var(--dur-slow) var(--ease-out);
+}
+
+.cat-plaza-bubble::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: var(--surface);
+  filter: drop-shadow(0 1px 0 var(--border));
+}
+
+.cat-plaza-bubble--prev {
+  --plaza-bubble-scale: 0.88;
+  z-index: 1;
+  opacity: 0.55;
+}
+
+/* The leftmost/rightmost actor's bubble would otherwise center on the
+   avatar and overhang past the stage (and get clipped by the scroll
+   containers above it, or need horizontal scrolling to see) on narrow
+   screens. Anchor it to the inner edge of its slot instead. */
+.cat-plaza-slot:first-child .cat-plaza-bubble {
+  left: 0;
+  --plaza-bubble-x: 0%;
+  transform-origin: bottom left;
+}
+
+.cat-plaza-slot:first-child .cat-plaza-bubble::after {
+  left: 20px;
+  transform: none;
+}
+
+.cat-plaza-slot:last-child:not(:first-child) .cat-plaza-bubble {
+  left: auto;
+  right: 0;
+  --plaza-bubble-x: 0%;
+  transform-origin: bottom right;
+}
+
+.cat-plaza-slot:last-child:not(:first-child) .cat-plaza-bubble::after {
+  left: auto;
+  right: 20px;
+  transform: none;
+}
+
+@keyframes cat-plaza-bubble-in {
+  from {
+    opacity: 0;
+    transform: translateX(var(--plaza-bubble-x)) translateY(6px)
+      scale(calc(var(--plaza-bubble-scale) * 0.94));
+  }
+  to {
+    opacity: 1;
+    transform: translateX(var(--plaza-bubble-x)) translateY(0) scale(var(--plaza-bubble-scale));
+  }
+}
+
+.cat-plaza-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 0.9em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: tc-blink 0.9s step-end infinite;
+}
+
+@keyframes tc-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* --- Actor popover ----------------------------------------------------------------- */
+
+.cat-plaza-popover-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  z-index: 40;
+}
+
+.cat-plaza-popover {
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3);
+}
+
+.cat-plaza-popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.cat-plaza-popover-head h4 {
+  margin: 0;
+}
+
+.cat-plaza-popover-close {
+  appearance: none;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-subtle);
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+  line-height: 0;
+}
+
+.cat-plaza-popover-close:hover {
+  color: var(--text-h);
+  background: var(--surface-hover);
+}
+
+.cat-plaza-popover-summary {
+  -webkit-line-clamp: 4;
+  min-height: 0;
+}
+
+/* --- Responsive ------------------------------------------------------------------ */
+
+@media (max-width: 640px) {
+  .cat-plaza-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .cat-plaza-hint {
+    text-align: left;
+    max-width: none;
+  }
+
+  .cat-plaza-scene {
+    min-height: 190px;
+    padding: 100px var(--space-2) var(--space-3);
+    gap: var(--space-1);
+  }
+
+  .cat-plaza-bubble {
+    max-width: min(130px, calc(50vw - var(--space-4)));
+    font-size: 0.72rem;
+  }
+
+  .cat-plaza-ended {
+    width: 100%;
+  }
+
+  .cat-plaza-log-list {
+    max-height: 140px;
+  }
+}

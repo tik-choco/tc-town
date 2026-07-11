@@ -8,16 +8,15 @@ import { SettingsView } from './views/SettingsView'
 import { CatalogView, setPendingCatalogShareCid } from './views/CatalogView'
 import { Onboarding } from './components/Onboarding'
 import { markOnboardingDone, shouldShowOnboarding, subscribeOnboardingRequests } from './lib/onboarding'
+import { subscribeNavigationRequests, type AppView } from './lib/navigation'
 import { parseCatalogShareInput } from './lib/catalog'
 import { listCharacters } from './lib/characterStorage'
 import './app.css'
 
-type View = 'characters' | 'worlds' | 'chat' | 'voice' | 'settings' | 'catalog'
-
 // NAV id/label pairs are user-facing text only — the underlying view id stays
 // 'catalog' (and CatalogView/catalog.ts/etc. keep their internal names) per
 // the ひろば rename; only the displayed label and nav position change.
-const NAV: Array<{ id: View; label: string; icon: typeof Users }> = [
+const NAV: Array<{ id: AppView; label: string; icon: typeof Users }> = [
   { id: 'characters', label: 'キャラクター', icon: Users },
   { id: 'worlds', label: '世界観', icon: Globe },
   { id: 'catalog', label: 'ひろば', icon: Trees },
@@ -38,7 +37,7 @@ const NAV: Array<{ id: View; label: string; icon: typeof Users }> = [
 // Precedence: (1) a share-link deep link always wins, (2) a brand-new user
 // with zero characters lands on ひろば so they see what's possible before
 // building their own, (3) everyone else lands on their character list.
-function resolveInitialView(): View {
+function resolveInitialView(): AppView {
   const cid = parseCatalogShareInput(location.hash)
   if (cid) {
     setPendingCatalogShareCid(cid)
@@ -50,7 +49,11 @@ function resolveInitialView(): View {
 }
 
 export function App() {
-  const [view, setView] = useState<View>(() => resolveInitialView())
+  const [view, setView] = useState<AppView>(() => resolveInitialView())
+
+  // Lets any view (e.g. a CTA button) ask the shell to switch views without
+  // prop-threading a setView callback through every view.
+  useEffect(() => subscribeNavigationRequests(setView), [])
 
   // First-run wizard: shown once on a fresh install, and re-openable from the
   // settings screen. Closing it (any path) marks onboarding done.
