@@ -5,6 +5,7 @@ import { App } from './app.tsx'
 import { AppSettingsProvider } from './hooks/useAppSettings'
 import { loadAppSettings } from './lib/appSettings'
 import { startCharacterIndexPublisher } from './lib/characterIndexPublisher'
+import { startTownBackupPublisher } from './lib/townBackupPublisher'
 import { writeAppManifest } from './lib/appManifest'
 import { BUS_VERSION } from './lib/sharedBus'
 import { migrateLegacyProviderSettingsToShared } from './lib/llmSettings'
@@ -31,11 +32,12 @@ render(
 )
 
 startCharacterIndexPublisher()
+startTownBackupPublisher()
 
 writeAppManifest({
   app: 'tc-town',
   busVersion: BUS_VERSION,
-  publishes: ['character-index'],
+  publishes: ['character-index', 'town-backup'],
   consumes: [],
   reads: [],
 })

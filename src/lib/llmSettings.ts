@@ -17,6 +17,7 @@ import {
   saveLlmConfig,
   type SharedLlmConfigV1,
 } from "./llmConfig";
+import { notifyAppDataChanged } from "./appDataChangeBus";
 
 const SETTINGS_KEY = "tc-town:provider-settings";
 
@@ -88,6 +89,7 @@ export function saveProviderSettings(settings: ProviderSettings): void {
   } catch (error) {
     console.warn("tc-town: failed to persist provider settings", error);
   }
+  notifyAppDataChanged();
 }
 
 // -----------------------------------------------------------------------------

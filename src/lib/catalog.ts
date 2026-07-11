@@ -449,6 +449,31 @@ export async function importCatalogEntry(
   return { characterId, missingVrm };
 }
 
+/**
+ * Fetches + imports a catalog payload by CID. Shared by CatalogView (the
+ * directory grid and the share-link box) and PlazaStage's actor popover so
+ * every import entry point uses the exact same fetch/import path and
+ * success/failure messaging.
+ */
+export async function fetchAndImportCatalogCid(
+  cid: string,
+): Promise<{ name: string; missingVrm: boolean; characterId: string }> {
+  const payload = await fetchCatalogPayload(cid);
+  if (!payload) throw new Error("データを取得できませんでした。相手がオフラインか、リンクが正しくない可能性があります。");
+  const result = await importCatalogEntry(payload);
+  return {
+    name: payload.character.sheet?.name || "（無名のキャラクター）",
+    missingVrm: result.missingVrm,
+    characterId: result.characterId,
+  };
+}
+
+/** Shortens a peer/DID id for display (e.g. a catalog entry's author) when no display name is set. */
+export function shortenPeerId(id: string): string {
+  if (!id) return "不明";
+  return id.length <= 16 ? id : `${id.slice(0, 10)}…${id.slice(-4)}`;
+}
+
 // --- share links -------------------------------------------------------------------
 
 /** Builds a direct link to a published payload's CID (works for both public and unlisted publishes). */

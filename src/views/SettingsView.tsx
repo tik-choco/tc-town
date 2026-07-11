@@ -6,16 +6,22 @@
 //
 // Sections are presented as tabs (see SETTINGS_TABS below) — the tab picks
 // which panel renders in JSX only. All stateful hooks (settings, the AI
-// Network consumer/provider lifecycle, backup state) stay unconditional at
-// the top of SettingsView so switching tabs never resets a connection or
-// drops in-flight state. The active tab itself is remembered in
-// localStorage so re-opening Settings returns to where the user left off.
+// Network consumer/provider lifecycle) stay unconditional at the top of
+// SettingsView so switching tabs never resets a connection or drops
+// in-flight state. The active tab itself is remembered in localStorage so
+// re-opening Settings returns to where the user left off.
+//
+// There used to be a manual "backup" tab here (export/import a full JSON
+// bundle by hand). It's gone — the same bundle is now auto-published to
+// tc-storage's drive via the shared bus (lib/townBackupPublisher.ts, topic
+// "town-backup"), started once in main.tsx. A full bundle file is still
+// importable via the Characters screen's importer (lib/exportImport.ts's
+// parseCharacterImport accepts both a single-character file and a full
+// bundle) — that remains the restore path.
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import {
   Cpu,
-  DatabaseBackup,
-  Download,
   Mic,
   Network,
   Palette,
@@ -26,20 +32,12 @@ import {
   Smile,
   Sparkles,
   Trash2,
-  Upload,
 } from "lucide-preact";
 import { MESSAGES_JA } from "@tik-choco/mistai";
 import { ConsumerStatusIndicator, ProviderStatusPanel } from "@tik-choco/mistai/preact";
 import "@tik-choco/mistai/ui.css";
 import { useAppSettings } from "../hooks/useAppSettings";
-import { loadAppSettings } from "../lib/appSettings";
 import { requestOnboarding } from "../lib/onboarding";
-import {
-  buildExportBundle,
-  downloadExportBundle,
-  importCharacters,
-  parseExportBundle,
-} from "../lib/exportImport";
 import {
   DEFAULT_REASONING_EFFORT,
   EXPRESSION_MODES,
@@ -285,14 +283,13 @@ function expressionStatusLabel(status: ExpressionFeatureStatus): string {
 // selection is remembered across visits (localStorage, parsed defensively —
 // same pattern as appSettings.ts / llmSettings.ts).
 
-type SettingsTabId = "appearance" | "llm" | "network" | "voice" | "backup" | "onboarding";
+type SettingsTabId = "appearance" | "llm" | "network" | "voice" | "onboarding";
 
 const SETTINGS_TABS: Array<{ id: SettingsTabId; label: string; icon: typeof Palette }> = [
   { id: "appearance", label: "表示", icon: Palette },
   { id: "llm", label: "LLM", icon: Cpu },
   { id: "network", label: "AIネットワーク", icon: Network },
   { id: "voice", label: "音声", icon: Mic },
-  { id: "backup", label: "バックアップ", icon: DatabaseBackup },
   { id: "onboarding", label: "はじめに", icon: Sparkles },
 ];
 
@@ -456,70 +453,6 @@ export function SettingsView() {
     const timer = setTimeout(() => void connectNetworkConsumer(consumerRoom), 500);
     return () => clearTimeout(timer);
   }, [settings.networkConsumerEnabled, consumerRoom]);
-
-  // ----- Data backup (export/import) ----------------------------------------
-  const [exportBusy, setExportBusy] = useState(false);
-  const [exportStatus, setExportStatus] = useState<string | null>(null);
-  const [applyAppSettingsOnImport, setApplyAppSettingsOnImport] = useState(false);
-  const [applyProviderSettingsOnImport, setApplyProviderSettingsOnImport] = useState(false);
-  const [importBusy, setImportBusy] = useState(false);
-  const [importStatus, setImportStatus] = useState<string | null>(null);
-  const importFileInputRef = useRef<HTMLInputElement>(null);
-
-  async function handleExport() {
-    setExportBusy(true);
-    setExportStatus(null);
-    try {
-      const bundle = await buildExportBundle(loadAppSettings(), settings);
-      downloadExportBundle(bundle);
-      setExportStatus(`書き出しました（キャラクター ${bundle.characters.length} 件）。`);
-    } catch (error) {
-      window.alert(`エクスポートに失敗しました: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setExportBusy(false);
-    }
-  }
-
-  async function handleImportFile(file: File) {
-    setImportStatus(null);
-    let bundle;
-    try {
-      bundle = parseExportBundle(await file.text());
-    } catch (error) {
-      setImportStatus(`インポートに失敗しました: ${error instanceof Error ? error.message : String(error)}`);
-      return;
-    }
-
-    const confirmLines = [
-      `キャラクター ${bundle.characters.length} 件を読み込みます（IDが一致する場合は上書き、それ以外は追加）。`,
-      `表示設定: ${applyAppSettingsOnImport ? "上書きする" : "上書きしない"}`,
-      `AIネットワーク設定: ${applyProviderSettingsOnImport ? "上書きする" : "上書きしない"}`,
-      "",
-      "この操作は元に戻せません。",
-    ];
-    if (!window.confirm(`${confirmLines.join("\n")}\n\nよろしいですか？`)) return;
-
-    setImportBusy(true);
-    try {
-      const result = await importCharacters(bundle);
-      if (applyAppSettingsOnImport) {
-        setTheme(bundle.appSettings.theme);
-        setLanguage(bundle.appSettings.language);
-      }
-      if (applyProviderSettingsOnImport) {
-        update(bundle.providerSettings);
-      }
-      const skippedNote = result.skipped ? ` / スキップ ${result.skipped} 件` : "";
-      const missingVrmNote = result.missingVrm
-        ? ` / VRM未所持のためアバターなしで取り込み ${result.missingVrm} 件`
-        : "";
-      setImportStatus(`インポート完了: 追加 ${result.added} 件 / 更新 ${result.updated} 件${skippedNote}${missingVrmNote}`);
-    } catch (error) {
-      setImportStatus(`インポートに失敗しました: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setImportBusy(false);
-    }
-  }
 
   // ----- Provider lifecycle (share this app's default preset) -------------
   const providerRoom = cfg.network.roomId.trim();
@@ -976,79 +909,6 @@ export function SettingsView() {
               }}
             />
           </label>
-          </section>
-        ) : null}
-
-        {/* --- Data backup (export/import) ------------------------------------ */}
-        {activeTab === "backup" ? (
-          <section
-            class="tc-settings-section"
-            role="tabpanel"
-            id="tc-settings-panel-backup"
-            aria-labelledby="tc-settings-tab-backup"
-          >
-          <div class="tc-settings-heading-row">
-            <DatabaseBackup size={18} />
-            <h2 class="tc-settings-heading">データのバックアップ</h2>
-          </div>
-          <p class="tc-hint">
-            キャラクターとアバター、各種設定を1つのJSONファイルに書き出したり、書き出したファイルから読み込んだりできます。他の端末への引き継ぎや、誤操作からの復元に使えます。
-            なお、VRMモデル本体はファイルに含まれません。インポート先に同じVRMがライブラリにある場合は自動で再リンクされます。
-            LLM/TTS/STTの接続先（APIキーを含む）はこのファイルに含まれません — 同一ブラウザの他のtik-chocoアプリとも共有される設定のため、「LLM」「音声」タブから直接管理してください。
-          </p>
-
-          <div class="tc-backup-block">
-            <h3 class="tc-subheading">エクスポート（書き出し）</h3>
-            <button type="button" class="tc-btn" onClick={() => void handleExport()} disabled={exportBusy}>
-              <Download size={16} />
-              {exportBusy ? "書き出し中..." : "エクスポート"}
-            </button>
-            {exportStatus ? <p class="tc-backup-status">{exportStatus}</p> : null}
-          </div>
-
-          <div class="tc-backup-block">
-            <h3 class="tc-subheading">インポート（読み込み）</h3>
-            <p class="tc-hint">
-              キャラクターは常にインポートされます（IDが一致する場合は上書き、それ以外は追加されます）。この操作は元に戻せません。
-            </p>
-            <label class="tc-checkbox-field">
-              <input
-                type="checkbox"
-                checked={applyAppSettingsOnImport}
-                onChange={(e) => setApplyAppSettingsOnImport(e.currentTarget.checked)}
-              />
-              <span>表示設定（テーマ・言語）も上書きする</span>
-            </label>
-            <label class="tc-checkbox-field">
-              <input
-                type="checkbox"
-                checked={applyProviderSettingsOnImport}
-                onChange={(e) => setApplyProviderSettingsOnImport(e.currentTarget.checked)}
-              />
-              <span>AIネットワーク設定（トグル・無音待機時間）も上書きする</span>
-            </label>
-            <button
-              type="button"
-              class="tc-btn"
-              onClick={() => importFileInputRef.current?.click()}
-              disabled={importBusy}
-            >
-              <Upload size={16} />
-              {importBusy ? "読み込み中..." : "インポート"}
-            </button>
-            <input
-              ref={importFileInputRef}
-              type="file"
-              accept="application/json"
-              style={{ display: "none" }}
-              onChange={(e) => {
-                const file = e.currentTarget.files?.[0];
-                e.currentTarget.value = "";
-                if (file) void handleImportFile(file);
-              }}
-            />
-            {importStatus ? <p class="tc-backup-status">{importStatus}</p> : null}
-          </div>
           </section>
         ) : null}
 

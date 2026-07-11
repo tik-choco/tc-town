@@ -2,6 +2,8 @@
 // JSON in localStorage, parsed defensively (never trust stored content),
 // immutable update helpers.
 
+import { notifyAppDataChanged } from "./appDataChangeBus";
+
 const SETTINGS_KEY = "tc-town:app-settings";
 
 /** "system" follows the OS's prefers-color-scheme; light/dark are explicit overrides. */
@@ -54,4 +56,5 @@ export function loadAppSettings(): AppSettings {
 
 export function saveAppSettings(settings: AppSettings): void {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  notifyAppDataChanged();
 }

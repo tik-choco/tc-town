@@ -422,59 +422,6 @@
   padding-left: calc(16px + var(--space-3));
 }
 
-/* --- Data backup (export/import) -------------------------------------------- */
-
-.tc-backup-block {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-3);
-  padding: var(--space-4);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-1);
-}
-
-.tc-checkbox-field {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-  font-size: 0.85rem;
-  color: var(--text);
-  cursor: pointer;
-  /* Same rationale as .tc-role-head — wrap the label under the checkbox
-     instead of squeezing it. */
-  flex-wrap: wrap;
-}
-
-.tc-checkbox-field input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
-  margin-top: 2px;
-  flex: none;
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-
-.tc-checkbox-note {
-  display: block;
-  margin-top: 2px;
-  font-size: 0.76rem;
-  color: var(--text-subtle);
-}
-
-.tc-backup-block .tc-subheading {
-  margin: 0;
-}
-
-.tc-backup-status {
-  margin: 0;
-  font-size: 0.82rem;
-  font-weight: 500;
-  color: var(--text-h);
-}
-
 /* --- Narrow viewports (~360-430px phones) ----------------------------------
    Most rows above already stack fine because .tc-field is column-based, but
    a few rows still put fixed-size siblings (icons, a badge, a delete
