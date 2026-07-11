@@ -1,0 +1,136 @@
+.tc-town-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.tc-town-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  background: var(--header-bg);
+  backdrop-filter: blur(8px);
+  /* MD3 top app bar: a hairline seam plus a faint elevation shadow reads as
+     a surface gently floating above the content, rather than a hard rule. */
+  border-bottom: 1px solid var(--border);
+  box-shadow: var(--shadow-1);
+  position: relative;
+  z-index: 1;
+}
+
+.tc-town-header h1 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-h);
+  margin: 0;
+}
+
+.tc-town-nav {
+  display: flex;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.tc-town-nav button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-pill);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  /* A pill's label must never be given less width than its content needs —
+     letting flex shrink it is what turns Japanese labels into one
+     character per line on narrow viewports. */
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background var(--dur-med) var(--ease), color var(--dur-med) var(--ease);
+}
+
+.tc-town-nav button svg {
+  flex-shrink: 0;
+}
+
+/* MD3 navigation bar: unselected items get a plain state-layer hover; the
+   selected item is a tonal pill (accent-tinted fill + accent content) with
+   no underline, so the indicator reads as a filled shape rather than a
+   ruled line. */
+.tc-town-nav button:hover {
+  background: var(--surface-hover);
+}
+
+.tc-town-nav button[aria-current='page'] {
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.tc-town-nav button[aria-current='page']:hover {
+  background: var(--accent-bg-strong);
+}
+
+.tc-town-main {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.tc-town-view {
+  height: 100%;
+  /* Opacity-only, delayed 50ms with a backwards fill: the heavy work a view
+     does on mount (VRM loads, WebGL init, storage reads) lands while the view
+     is still invisible, so the fade itself plays on a settled main thread
+     instead of stuttering through it. Transform is deliberately not animated —
+     rastering the whole moving view subtree is what made the fade+slide janky. */
+  animation: tc-view-enter var(--dur-med) var(--ease-out) 50ms backwards;
+}
+
+@keyframes tc-view-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.tc-town-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-subtle);
+}
+
+@media (max-width: 768px) {
+  /* Six labelled nav pills don't fit next to the title at ~360px even with
+     nowrap — the row itself would overflow. Rather than let the header
+     scroll sideways, drop to icon-only buttons and let the title truncate
+     first (it's the least essential element here). */
+  .tc-town-header h1 {
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tc-town-nav-label {
+    /* Label stays in the DOM (aria-label/title on the button cover
+       accessibility) and reappears once there's room above the breakpoint. */
+    display: none;
+  }
+
+  .tc-town-nav button {
+    /* No label text left to size the pill, so give it an even, roomier
+       square-ish tap target instead of the asymmetric label padding. */
+    padding: var(--space-3);
+  }
+}

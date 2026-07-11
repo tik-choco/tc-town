@@ -1,0 +1,33 @@
+{
+  "name": "tc-town",
+  "private": true,
+  "version": "0.0.0",
+  "license": "MPL-2.0",
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/fetch-mistlib.mjs",
+    "dev": "vite --host",
+    "prebuild": "node scripts/fetch-mistlib.mjs",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host",
+    "fetch-mistlib": "node scripts/fetch-mistlib.mjs",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@pixiv/three-vrm": "^3.4.2",
+    "@pixiv/three-vrm-animation": "^3.5.4",
+    "@tik-choco/mistai": "github:tik-choco-lab/mistai",
+    "lucide-preact": "^1.16.0",
+    "preact": "^10.29.3",
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.5",
+    "@types/node": "^24.13.2",
+    "@types/three": "^0.180.0",
+    "dotenv": "^16.4.7",
+    "typescript": "~6.0.2",
+    "vite": "^8.1.1",
+    "vitest": "^4.1.9"
+  }
+}
