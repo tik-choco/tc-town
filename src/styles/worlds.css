@@ -1,0 +1,511 @@
+/* World-setting management view — list + editor, styled to match
+   characters.css's cv-* form language. Uses the shared design tokens from
+   src/index.css. */
+
+.wv-root {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* --- Sidebar --------------------------------------------------------------- */
+
+.wv-sidebar {
+  width: 280px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  min-height: 0;
+}
+
+.wv-create {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.wv-create .wv-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.wv-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.wv-empty {
+  color: var(--text-subtle);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  margin: var(--space-3);
+}
+
+/* Friendlier empty states: a muted icon stacked above (or beside, for the
+   -inline variant) the helper copy instead of bare text. */
+.wv-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-5) var(--space-3);
+  color: var(--text-subtle);
+  text-align: center;
+}
+
+.wv-empty-state .wv-empty {
+  margin: 0;
+}
+
+.wv-empty-state-inline {
+  flex-direction: row;
+  justify-content: flex-start;
+  text-align: left;
+  padding: 0;
+}
+
+.wv-list-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  transition: background var(--dur-fast) var(--ease);
+}
+
+/* MD3-style state layer: a translucent overlay rather than an opaque
+   background swap, so the hover feedback reads as "lit up" not "recolored". */
+.wv-list-item:hover {
+  background: var(--surface-hover);
+}
+
+.wv-list-item.is-active {
+  background: var(--accent-bg);
+}
+
+.wv-list-item.is-active:hover {
+  background: var(--accent-bg-strong);
+}
+
+.wv-list-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
+  color: var(--accent);
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.wv-list-item.is-active .wv-list-icon {
+  background: var(--accent-bg-strong);
+}
+
+.wv-list-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.wv-list-name {
+  font-weight: 600;
+  color: var(--text-h);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wv-list-item.is-active .wv-list-name {
+  color: var(--accent);
+}
+
+.wv-list-summary {
+  font-size: 0.8rem;
+  color: var(--text-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- Main / editor --------------------------------------------------------- */
+
+.wv-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.wv-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  height: 100%;
+  color: var(--text-subtle);
+  padding: var(--space-6);
+  text-align: center;
+}
+
+.wv-placeholder-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.wv-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 760px;
+  margin: var(--space-5);
+  padding: var(--space-5);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  transition: box-shadow var(--dur-med) var(--ease);
+}
+
+.wv-panel:hover {
+  box-shadow: var(--shadow-2);
+}
+
+.wv-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  /* Title and actions each shrink independently (min-width: 0 / flex: none
+     below); wrapping the row itself is the last-resort fallback so a narrow
+     panel stacks them instead of forcing either side past its content's
+     natural break points. */
+  flex-wrap: wrap;
+}
+
+.wv-panel-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  color: var(--accent);
+}
+
+.wv-panel-title h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--text-h);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wv-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.wv-autosave-hint {
+  font-size: 0.8rem;
+  color: var(--text-subtle);
+  white-space: nowrap;
+}
+
+.wv-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.wv-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.wv-label-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-subtle);
+}
+
+.wv-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.wv-desc-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* --- Status text ------------------------------------------------------------ */
+
+.wv-status {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.wv-status-error {
+  color: var(--danger);
+}
+
+/* --- Member (所属キャラクター) list ----------------------------------------- */
+
+.wv-empty-inline {
+  margin: 0;
+}
+
+.wv-members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.wv-member {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  width: 76px;
+  padding: var(--space-2);
+  border-radius: var(--radius-lg);
+  text-align: center;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.wv-member:hover {
+  background: var(--surface-hover);
+}
+
+.wv-member-name {
+  font-size: 0.75rem;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* --- Form controls --------------------------------------------------------- */
+
+.wv-input,
+.wv-textarea {
+  width: 100%;
+  font: inherit;
+  color: var(--text-h);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+
+.wv-textarea {
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.wv-input:hover:not(:disabled),
+.wv-textarea:hover:not(:disabled) {
+  border-color: var(--text-subtle);
+}
+
+.wv-input:focus-visible,
+.wv-textarea:focus-visible,
+.wv-input:focus,
+.wv-textarea:focus {
+  outline: none;
+  background: var(--surface);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.wv-input:disabled,
+.wv-textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* --- Buttons --------------------------------------------------------------- */
+
+/* MD3-ish button set: outlined (default) / filled (accent) / tonal / danger.
+   All buttons share the pill silhouette; filled gets a resting elevation
+   that lifts slightly on hover, the others stay flat and rely on fill
+   changes for feedback. Mirrors characters.css's cv-btn family. */
+.wv-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  font: inherit;
+  font-weight: 600;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-h);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease),
+    opacity var(--dur-fast) var(--ease);
+}
+
+.wv-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--text-subtle);
+}
+
+.wv-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.wv-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.wv-btn-sm {
+  padding: var(--space-1) var(--space-3);
+  font-size: 0.8rem;
+}
+
+.wv-btn-sm .spinner {
+  width: 0.9em;
+  height: 0.9em;
+}
+
+.wv-btn-accent {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  box-shadow: var(--shadow-1);
+}
+
+.wv-btn-accent:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  box-shadow: var(--shadow-2);
+  transform: translateY(-1px);
+}
+
+.wv-btn-accent:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: var(--shadow-1);
+}
+
+.wv-btn-accent:disabled {
+  box-shadow: none;
+}
+
+/* Tonal: secondary actions — a soft accent fill without the attention-
+   grabbing weight of the filled/accent button. */
+.wv-btn-tonal {
+  background: var(--accent-bg);
+  border-color: transparent;
+  color: var(--accent);
+}
+
+.wv-btn-tonal:hover:not(:disabled) {
+  background: var(--accent-bg-strong);
+  border-color: transparent;
+}
+
+.wv-btn-danger {
+  color: var(--danger);
+  border-color: transparent;
+  background: var(--danger-bg);
+}
+
+.wv-btn-danger:hover:not(:disabled) {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--on-accent);
+}
+
+/* --- Responsive ------------------------------------------------------------ */
+
+@media (max-width: 640px) {
+  .wv-sidebar {
+    width: 220px;
+  }
+
+  .wv-panel {
+    margin: var(--space-3);
+  }
+}
+
+/* Phone widths: a 220px sidebar next to the editor pane leaves as little as
+   ~140px for the main column, which is not enough room for the panel header,
+   button rows, or member chips — Japanese text has no spaces, so browsers
+   are free to line-break between every character and the squeezed row turns
+   into a single vertical column of glyphs. Stack the sidebar above the
+   editor instead of narrowing it further. */
+@media (max-width: 480px) {
+  .wv-root {
+    flex-direction: column;
+  }
+
+  .wv-sidebar {
+    width: 100%;
+    flex: none;
+    max-height: 40vh;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .wv-main {
+    width: 100%;
+    flex: 1;
+  }
+
+  .wv-panel {
+    margin: var(--space-3);
+    padding: var(--space-4);
+  }
+
+  .wv-panel-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}

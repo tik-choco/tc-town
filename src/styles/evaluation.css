@@ -1,0 +1,179 @@
+/* Conversation evaluation panel — LLM-scored rubric review for a chat session. */
+
+.tc-eval-panel {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.tc-eval-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  /* Title + "評価を実行" button can outgrow a phone-width panel — wrap onto a
+     second line rather than squeezing either one down to near-zero width. */
+  flex-wrap: wrap;
+}
+
+.tc-eval-panel-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-h);
+  white-space: nowrap;
+}
+
+.tc-eval-history {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tc-eval-history-label {
+  font-size: 0.78rem;
+  color: var(--text-subtle);
+  flex-shrink: 0;
+}
+
+.tc-eval-history-select {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-h);
+  border-radius: var(--radius-md);
+  padding: var(--space-1) var(--space-2);
+  font: inherit;
+  font-size: 0.82rem;
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+
+.tc-eval-history-select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.tc-eval-error {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  font-size: 0.82rem;
+}
+
+.tc-eval-empty {
+  color: var(--text-subtle);
+  font-size: 0.85rem;
+  padding: var(--space-2) 0;
+}
+
+/* --- result card ----------------------------------------------------------- */
+
+.tc-eval-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  padding: var(--space-4);
+  box-shadow: var(--shadow-1);
+}
+
+.tc-eval-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  /* Average-score pill + timestamp can outgrow a phone-width card — wrap
+     rather than squeeze either one. */
+  flex-wrap: wrap;
+}
+
+.tc-eval-average {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-bg);
+  padding: 3px var(--space-3);
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}
+
+.tc-eval-time {
+  font-size: 0.75rem;
+  color: var(--text-subtle);
+  white-space: nowrap;
+}
+
+.tc-eval-axes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.tc-eval-axis-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.tc-eval-axis-label {
+  font-size: 0.82rem;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tc-eval-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.tc-eval-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--surface-3);
+  border: 1px solid var(--border-strong);
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+
+.tc-eval-dot.filled {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.tc-eval-axis-score {
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-subtle);
+  min-width: 2.4em;
+  text-align: right;
+}
+
+.tc-eval-notes {
+  font-size: 0.85rem;
+  color: var(--text-h);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3);
+}
+
+.tc-eval-latency {
+  font-size: 0.78rem;
+  color: var(--text-subtle);
+}

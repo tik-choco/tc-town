@@ -1,0 +1,520 @@
+/* Settings screen styling. Uses the shared design tokens from index.css so it
+   tracks the family teal/neutral theme in both light and dark automatically. */
+
+.tc-settings {
+  height: 100%;
+  overflow: auto;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.tc-settings-inner {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-5) var(--space-7);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.tc-settings-title {
+  margin: 0;
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--text-h);
+}
+
+/* --- Tabs -------------------------------------------------------------- */
+
+.tc-settings-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.tc-settings-tab {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-subtle);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
+.tc-settings-tab:hover {
+  color: var(--text-h);
+  background: var(--surface-hover);
+}
+
+.tc-settings-tab--active,
+.tc-settings-tab--active:hover {
+  color: var(--accent);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+
+.tc-settings-tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.tc-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.tc-settings-heading-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  /* Let a trailing button (e.g. the LLM tab's "追加" button) drop to its
+     own line instead of being flex-shrunk against the heading on narrow
+     screens. */
+  flex-wrap: wrap;
+}
+
+.tc-settings-heading {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.tc-settings-heading-row .tc-settings-heading {
+  flex: 1;
+}
+
+.tc-subheading {
+  margin: var(--space-2) 0 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.tc-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-subtle);
+  line-height: 1.5;
+}
+
+/* --- Fields ---------------------------------------------------------------- */
+
+.tc-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.tc-field > span {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.tc-settings input[type="text"],
+.tc-settings input[type="password"],
+.tc-settings input[type="number"],
+.tc-settings input:not([type]),
+.tc-settings select {
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--text-h);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+
+.tc-settings input::placeholder {
+  color: var(--text-placeholder);
+}
+
+.tc-settings input:hover:not(:focus-visible):not(:disabled),
+.tc-settings select:hover:not(:focus-visible) {
+  background: var(--surface-hover);
+}
+
+.tc-settings input:focus-visible,
+.tc-settings select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+/* --- Buttons --------------------------------------------------------------- */
+
+.tc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  /* Never let the label wrap character-by-character when a flex parent
+     (e.g. .tc-settings-heading-row) is squeezed on a narrow screen — the
+     parent should wrap the whole button to its own line instead. */
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+
+.tc-btn:hover:not(:disabled) {
+  background: var(--accent-bg-strong);
+  box-shadow: var(--shadow-1);
+}
+
+.tc-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tc-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2);
+  color: var(--text-subtle);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.tc-icon-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text-h);
+}
+
+.tc-icon-btn.danger:hover {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.tc-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.tc-icon-btn.loading svg {
+  animation: tc-spin 0.9s linear infinite;
+}
+
+@keyframes tc-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.tc-link-btn {
+  align-self: flex-start;
+  padding: 0;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tc-link-btn:hover {
+  text-decoration: underline;
+}
+
+/* --- Model picker (LLM profile / TTS / STT) --------------------------------- */
+
+.tc-model-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+}
+
+.tc-model-footer {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  /* .tc-model-status can hold a long fetch-error message while
+     .tc-link-btn stays nowrap — without wrap, the status text gets
+     flex-shrunk down toward its per-character min width on narrow
+     screens instead of just wrapping to a second line. */
+  flex-wrap: wrap;
+}
+
+.tc-model-status {
+  font-size: 0.78rem;
+  color: var(--text-subtle);
+  line-height: 1.4;
+}
+
+/* --- Profiles -------------------------------------------------------------- */
+
+.tc-profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.tc-profile-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  transition: box-shadow var(--dur-fast) var(--ease);
+}
+
+.tc-profile-card:hover {
+  box-shadow: var(--shadow-2);
+}
+
+.tc-profile-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.tc-profile-label {
+  flex: 1;
+  font-weight: 600 !important;
+}
+
+.tc-badge {
+  padding: 2px var(--space-3);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}
+
+/* --- Expression auto-switching (MD3-ish segmented control) ----------------- */
+
+.tc-expr-modes {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  align-self: flex-start;
+  padding: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+}
+
+.tc-expr-mode-btn {
+  appearance: none;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: var(--space-2) var(--space-4);
+  color: var(--text-subtle);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
+.tc-expr-mode-btn:hover {
+  color: var(--text-h);
+  background: var(--surface-hover);
+}
+
+.tc-expr-mode-btn--active,
+.tc-expr-mode-btn--active:hover {
+  color: var(--accent);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+
+.tc-expr-mode-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.tc-expr-status {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-subtle);
+  line-height: 1.5;
+}
+
+/* --- Network role cards ---------------------------------------------------- */
+
+.tc-role-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.tc-role-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  cursor: pointer;
+  /* Let the long Japanese role description wrap to its own full-width
+     line under the checkbox+icon on narrow screens rather than being
+     flex-shrunk toward per-character width. */
+  flex-wrap: wrap;
+}
+
+.tc-role-head input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.tc-role-title {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-h);
+}
+
+.tc-role-body {
+  padding-left: calc(16px + var(--space-3));
+}
+
+/* --- Data backup (export/import) -------------------------------------------- */
+
+.tc-backup-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.tc-checkbox-field {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  font-size: 0.85rem;
+  color: var(--text);
+  cursor: pointer;
+  /* Same rationale as .tc-role-head — wrap the label under the checkbox
+     instead of squeezing it. */
+  flex-wrap: wrap;
+}
+
+.tc-checkbox-field input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  flex: none;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.tc-checkbox-note {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.76rem;
+  color: var(--text-subtle);
+}
+
+.tc-backup-block .tc-subheading {
+  margin: 0;
+}
+
+.tc-backup-status {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text-h);
+}
+
+/* --- Narrow viewports (~360-430px phones) ----------------------------------
+   Most rows above already stack fine because .tc-field is column-based, but
+   a few rows still put fixed-size siblings (icons, a badge, a delete
+   button, the vendor status timestamp) next to Japanese text in a flex row.
+   Without room to breathe, flex-shrink can squeeze that text down toward
+   its per-character minimum width ("vertical text"). The flex-wrap rules
+   added above the fixed-width siblings fix most of it; the rules below
+   handle the remaining fixed-size cases and reclaim a little extra width
+   from the section padding. */
+@media (max-width: 768px) {
+  .tc-settings-inner {
+    padding: var(--space-5) var(--space-4) var(--space-6);
+  }
+
+  /* Profile card header: name input + "既定" badge + delete button. The
+     text input has a browser-default minimum width that can push this row
+     wider than the viewport, so give the input its own full-width line and
+     let the badge/delete button flow to the line below it. */
+  .tc-profile-head {
+    flex-wrap: wrap;
+  }
+
+  .tc-profile-label {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  /* --- Vendor LLM Network UI (@tik-choco/mistai/ui.css) --------------------
+     Scoped overrides only — the vendor stylesheet itself is not edited.
+     Its status rows pair a dot + label + timestamp with no wrap fallback,
+     and the connection detail popover has a fixed 200px min-width that can
+     overflow this panel's scroll container on narrow phones. */
+  .tc-settings .mistai-status-line,
+  .tc-settings .mistai-consumer-indicator-toggle {
+    flex-wrap: wrap;
+  }
+
+  .tc-settings .mistai-consumer-indicator-detail {
+    min-width: 0;
+    max-width: min(260px, calc(100vw - var(--space-6) * 2));
+    box-sizing: border-box;
+  }
+}

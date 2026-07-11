@@ -1,0 +1,338 @@
+/* Avatar rendering (image + VRM bust) and the avatar picker. Uses the shared
+   design tokens from src/index.css so it tracks light/dark automatically. */
+
+.tc-avatar {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--surface-3);
+  color: var(--text-h);
+  flex: none;
+  /* Width/height come from an inline style driven by the `size` prop
+     (CharacterAvatar.tsx); cap against the viewport so a caller's fixed px
+     size can never force horizontal page scroll on a narrow screen. */
+  max-width: 100%;
+}
+
+/* VRM busts use an angular frame instead of a circle so the head isn't
+   cropped by a round mask (a circle clips the top of the hair/head first). */
+.tc-avatar--rect {
+  border-radius: var(--radius-md);
+}
+
+/* VRM busts default to this: no background fill, no clipping, no rounded
+   box — the transparent WebGL canvas is composited straight onto the page so
+   the character reads as "standing in the UI" rather than boxed into a
+   circle/card that inevitably crops a chunk of a non-square model. */
+.tc-avatar--frameless {
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+.tc-avatar--speaking {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* A frameless VRM avatar has no visible box for an outline to sit on, so
+   "speaking" is shown instead as a soft accent glow pulsing on the ground
+   beneath the character. */
+.tc-avatar--frameless.tc-avatar--speaking {
+  outline: none;
+}
+
+.tc-avatar--frameless.tc-avatar--speaking::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -4%;
+  width: 62%;
+  height: 16%;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, var(--accent) 0%, transparent 72%);
+  filter: blur(3px);
+  pointer-events: none;
+  animation: tc-avatar-glow-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes tc-avatar-glow-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+.tc-avatar__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.tc-avatar__canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.tc-avatar__initial {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  user-select: none;
+}
+
+/* --- Avatar picker --------------------------------------------------- */
+
+.tc-avatar-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.tc-avatar-picker__preview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.tc-avatar-picker__meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.tc-avatar-picker__meta-name {
+  font-weight: 600;
+  color: var(--text-h);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tc-avatar-picker__meta-kind {
+  font-size: 0.8rem;
+  color: var(--text-subtle);
+}
+
+.tc-avatar-picker__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--border);
+}
+
+.tc-avatar-picker__tab {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: var(--space-2) var(--space-4);
+  font: inherit;
+  color: var(--text);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  white-space: nowrap;
+  flex: none;
+}
+
+.tc-avatar-picker__tab:hover {
+  color: var(--text-h);
+}
+
+.tc-avatar-picker__tab--active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.tc-avatar-picker__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.tc-avatar-picker__row {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.tc-avatar-picker__btn {
+  appearance: none;
+  font: inherit;
+  cursor: pointer;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-h);
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+  /* Keep the label on one line and let the flex row it sits in (preview,
+     tabs, or the __row button group) wrap the whole button instead of
+     letting the button itself get squeezed narrower than its text. */
+  white-space: nowrap;
+  flex: none;
+}
+
+.tc-avatar-picker__btn:hover {
+  background: var(--surface-hover);
+}
+
+.tc-avatar-picker__btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.tc-avatar-picker__btn--primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.tc-avatar-picker__btn--danger {
+  color: var(--danger);
+  border-color: var(--border);
+  background: transparent;
+}
+
+.tc-avatar-picker__btn--danger:hover {
+  background: var(--danger-bg);
+}
+
+.tc-avatar-picker__hidden-input {
+  display: none;
+}
+
+.tc-avatar-picker__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.tc-avatar-picker__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tc-avatar-picker__item-select {
+  appearance: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text);
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.tc-avatar-picker__item-select:hover {
+  background: var(--surface-hover);
+}
+
+.tc-avatar-picker__item-select--active {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--text-h);
+}
+
+.tc-avatar-picker__item-name {
+  /* min-width: 0 lets this shrink below its text's intrinsic width inside
+     the space-between flex row above so text-overflow: ellipsis can
+     actually engage instead of just overflowing into item-size. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tc-avatar-picker__item-size {
+  color: var(--text-subtle);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  flex: none;
+}
+
+.tc-avatar-picker__item-remove {
+  appearance: none;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-subtle);
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+  line-height: 0;
+  flex: none;
+}
+
+.tc-avatar-picker__item-remove:hover {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.tc-avatar-picker__empty,
+.tc-avatar-picker__error {
+  font-size: 0.85rem;
+  color: var(--text-subtle);
+  padding: var(--space-2) 0;
+}
+
+.tc-avatar-picker__error {
+  color: var(--danger);
+}
+
+/* --- Responsive ------------------------------------------------------ */
+
+/* Narrow phones: with a name/kind column plus a "クリア" button both wanting
+   room in .tc-avatar-picker__preview, drop the flex-wrap fallback (added
+   above) to an explicit stack so the meta column always gets the full
+   width instead of being squeezed by the button next to it. */
+@media (max-width: 480px) {
+  .tc-avatar-picker__preview {
+    align-items: flex-start;
+  }
+
+  .tc-avatar-picker__meta {
+    width: 100%;
+  }
+}
+
+/* --- Full-body VRM stage -------------------------------------------- */
+
+.tc-vrm-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.tc-vrm-stage__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}

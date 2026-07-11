@@ -1,0 +1,16 @@
+{
+  "name": "mistlib-wasm",
+  "type": "module",
+  "version": "0.1.0",
+  "license": "MPL-2.0",
+  "files": [
+    "mistlib_wasm_bg.wasm",
+    "mistlib_wasm.js",
+    "mistlib_wasm.d.ts"
+  ],
+  "main": "mistlib_wasm.js",
+  "types": "mistlib_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

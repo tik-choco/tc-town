@@ -1,0 +1,380 @@
+.tc-voice-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: var(--space-6);
+  gap: var(--space-5);
+  max-width: 640px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.tc-voice-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-subtle);
+  text-align: center;
+}
+
+/* --- character picker ------------------------------------------------ */
+
+.tc-voice-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.tc-voice-picker h2 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.tc-voice-picker-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.tc-voice-picker-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  font: inherit;
+  color: var(--text);
+  cursor: pointer;
+  width: 96px;
+  max-width: 100%;
+  /* Keep the tile at its intended width and let it wrap to a new row
+     instead — the flex-wrap container already handles overflow, so we
+     don't want individual tiles shrinking and squeezing the name span. */
+  flex-shrink: 0;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+
+.tc-voice-picker-item:hover {
+  background: var(--surface-hover);
+}
+
+.tc-voice-picker-item[aria-pressed="true"] {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+  box-shadow: var(--shadow-1);
+}
+
+.tc-voice-picker-item span {
+  font-size: 0.8rem;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.tc-voice-start {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  align-self: center;
+  padding: var(--space-3) var(--space-6);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-1);
+  transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+
+.tc-voice-start:hover:not(:disabled) {
+  background: var(--accent-hover);
+  box-shadow: var(--shadow-2);
+  transform: translateY(-1px);
+}
+
+.tc-voice-start:disabled {
+  background: var(--surface-3);
+  color: var(--text-subtle);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* --- call screen ------------------------------------------------------ */
+
+.tc-voice-call {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  height: 100%;
+  min-height: 0;
+}
+
+.tc-voice-avatar-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  /* Full width so the stage below can use the whole column — a narrow wrap
+     would hard-clip the character at its edges when zoomed/panned. */
+  width: 100%;
+}
+
+.tc-voice-avatar-wrap::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: min(420px, 95%);
+  /* Sized relative to the wrap so the glow tracks the responsive full-body
+     stage instead of a fixed-height strip. Capped below 72% (rather than
+     scaled to match the taller stage) so the glow stays centered behind the
+     upper body/face instead of stretching down behind the legs. */
+  height: min(72%, 480px);
+  transform: translateX(-50%);
+  background: radial-gradient(closest-side, var(--accent-bg) 0%, transparent 72%);
+  border-radius: 50%;
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* Responsive full-body VRM stage for the call screen: tall enough that the
+   whole figure reads large, and full-width so zooming/panning has horizontal
+   room instead of hitting a narrow column's edge. (The camera distance was
+   solved for the narrower DEFAULT_VRM_FULL_ASPECT, so a wider canvas only
+   adds side margin — the figure renders at the same size.) */
+.tc-voice-avatar-stage {
+  height: clamp(340px, 62vh, 760px);
+  width: 100%;
+  /* Dissolve edges instead of cropping: solid through the torso then fading
+     over the last ~30% at the bottom (legs melt into the transcript panel),
+     plus a short fade on the left/right so anything pushed to the sides by
+     zoom/pan dissolves rather than ending at a hard vertical line. The two
+     gradients must be intersected — default compositing would OR them and
+     lose both fades. */
+  mask-image:
+    linear-gradient(to bottom, black 0%, black 68%, transparent 96%),
+    linear-gradient(to right, transparent 0%, black 8%, black 92%, transparent 100%);
+  mask-composite: intersect;
+  -webkit-mask-image:
+    linear-gradient(to bottom, black 0%, black 68%, transparent 96%),
+    linear-gradient(to right, transparent 0%, black 8%, black 92%, transparent 100%);
+  -webkit-mask-composite: source-in;
+}
+
+.tc-voice-name {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-h);
+  /* User-entered names can be long, unspaced Latin strings — without this,
+     a name that's too wide to fit would overflow .tc-voice-avatar-wrap
+     horizontally instead of wrapping. */
+  max-width: 100%;
+  overflow-wrap: break-word;
+  text-align: center;
+}
+
+.tc-voice-status {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  color: var(--text-subtle);
+  font-size: 0.9rem;
+  min-height: 1.4em;
+  max-width: 100%;
+  text-align: center;
+}
+
+.tc-voice-status[data-status="listening"] {
+  color: var(--accent);
+}
+
+.tc-voice-status[data-status="thinking"],
+.tc-voice-status[data-status="speaking"] {
+  color: var(--text-h);
+}
+
+.tc-voice-status .lucide {
+  animation: tc-spin 1s linear infinite;
+}
+
+.tc-voice-error {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  font-size: 0.85rem;
+  max-width: 100%;
+  overflow-wrap: break-word;
+}
+
+/* Frosted-glass panel that overlaps the masked-out bottom of the avatar
+   stage: pulled up with a negative margin so it sits over the fading legs
+   rather than below them, while leaving the face/torso above it untouched
+   (the canvas drag-to-orbit still owns that area). -96px balances the face
+   staying near the vertical center against leaving enough transcript height
+   to be readable before scrolling kicks in. */
+.tc-voice-transcript {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  margin-top: -96px;
+  position: relative;
+  z-index: 1;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 55%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface-2) 62%, transparent);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  box-shadow: var(--shadow-2);
+}
+
+/* Browsers without backdrop-filter support can't fake translucency and stay
+   readable, so fall back to a mostly-opaque panel instead. */
+@supports not (backdrop-filter: blur(1px)) {
+  .tc-voice-transcript {
+    background: color-mix(in srgb, var(--surface-2) 92%, transparent);
+  }
+}
+
+.tc-voice-line {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0);
+  max-width: 85%;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  /* Transcript text is arbitrary LLM/user output — a long unbroken token
+     (URL, code, etc.) must wrap inside the bubble rather than pushing it
+     past the 85% cap and forcing the page to scroll horizontally. */
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.tc-voice-line[data-role="user"] {
+  align-self: flex-end;
+  background: var(--accent-bg);
+  color: var(--text-h);
+  border-top-right-radius: var(--radius-sm);
+}
+
+.tc-voice-line[data-role="assistant"] {
+  align-self: flex-start;
+  border-top-left-radius: var(--radius-sm);
+}
+
+.tc-voice-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-5);
+  padding: var(--space-4) 0 var(--space-2);
+}
+
+.tc-voice-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  /* Round icon buttons must keep their tap-target size — never let the flex
+     row shrink them to make room for a sibling. */
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: var(--shadow-1);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+
+.tc-voice-btn:hover {
+  background: var(--surface-hover);
+  box-shadow: var(--shadow-2);
+  transform: translateY(-1px);
+}
+
+.tc-voice-btn[aria-pressed="true"] {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.tc-voice-btn-end {
+  width: 60px;
+  height: 60px;
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+  box-shadow: var(--shadow-2);
+}
+
+.tc-voice-btn-end:hover {
+  background: var(--danger);
+  opacity: 0.9;
+  box-shadow: var(--shadow-3);
+  transform: translateY(-1px);
+}
+
+/* --- Responsive -------------------------------------------------------- */
+
+@media (max-width: 640px) {
+  .tc-voice-view {
+    /* The 24px side padding eats a large share of a ~360-430px phone
+       screen; trim it so the picker grid, transcript bubbles, and call
+       controls get more usable width instead of being squeezed. */
+    padding: var(--space-4);
+  }
+
+  .tc-voice-avatar-stage {
+    /* The full-body stage's 62vh target is fine on tall phones but eats the
+       whole screen on short/landscape ones, starving the transcript below
+       it — lower the ceiling and the min so the stage yields space back. */
+    height: clamp(260px, 50vh, 560px);
+  }
+
+  .tc-voice-transcript {
+    /* Scale the pull-up with the smaller stage: -96px on a ~260px-tall
+       stage would eat more than a third of it, crowding out bubble text. */
+    margin-top: -64px;
+  }
+}
+
+@media (max-width: 480px) {
+  .tc-voice-controls {
+    /* Narrower gap so the two circular buttons never need to wrap on the
+       smallest supported phones; wrapping was kept above as a safety net
+       (e.g. if a third control button is added later). */
+    gap: var(--space-4);
+  }
+}

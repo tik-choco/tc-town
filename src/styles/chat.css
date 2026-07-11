@@ -1,0 +1,518 @@
+/* Conversation view — session sidebar + multi-character chat room. */
+
+.tc-chat {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* --- sidebar ------------------------------------------------------------- */
+
+.tc-chat-sidebar {
+  display: flex;
+  flex-direction: column;
+  width: 240px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.tc-chat-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-4);
+  font-weight: 600;
+  color: var(--text-h);
+  border-bottom: 1px solid var(--border);
+}
+
+.tc-chat-session-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-2);
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.tc-chat-session-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+
+.tc-chat-session-row:hover {
+  background: var(--surface-hover);
+}
+
+.tc-chat-session-row.active {
+  background: var(--accent-bg);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.tc-chat-session-row.editing {
+  padding: var(--space-1);
+}
+
+.tc-chat-session-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+}
+
+.tc-chat-session-title {
+  font-size: 0.9rem;
+  color: var(--text-h);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.tc-chat-session-meta {
+  font-size: 0.72rem;
+  color: var(--text-subtle);
+}
+
+.tc-chat-empty,
+.tc-chat-empty-transcript {
+  color: var(--text-subtle);
+  font-size: 0.85rem;
+  padding: var(--space-4);
+  text-align: center;
+}
+
+/* --- shared controls ----------------------------------------------------- */
+
+.tc-chat-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-subtle);
+  cursor: pointer;
+  padding: var(--space-2);
+  border-radius: 50%;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.tc-chat-icon-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text-h);
+}
+
+.tc-chat-icon-btn.danger:hover {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.tc-chat-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-pill);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  /* Japanese labels have no spaces, so a shrinking flex parent can otherwise
+     wrap them one character per line instead of shrinking the button itself
+     or wrapping to a new flex line — force the label onto one line and let
+     the surrounding row wrap instead. */
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
+.tc-chat-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+.tc-chat-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tc-chat-btn-accent {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: transparent;
+  box-shadow: var(--shadow-1);
+}
+
+.tc-chat-btn-accent:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: transparent;
+  box-shadow: var(--shadow-2);
+}
+
+.tc-chat-btn-danger {
+  background: var(--danger);
+  color: #fff;
+  border-color: transparent;
+}
+
+.tc-chat-btn-danger:hover:not(:disabled) {
+  background: var(--danger);
+  border-color: transparent;
+  opacity: 0.9;
+}
+
+.tc-chat-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-h);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  font: inherit;
+  font-size: 0.9rem;
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+
+.tc-chat-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+/* --- room ---------------------------------------------------------------- */
+
+.tc-chat-room,
+.tc-chat-placeholder {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.tc-chat-placeholder {
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  color: var(--text-subtle);
+}
+
+.tc-chat-room-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  /* On narrow viewports the participant chips + action buttons no longer fit
+     on one line — wrap the whole head instead of squeezing either side down
+     to near-zero width. Harmless at desktop widths since both groups already
+     fit on one line there. */
+  flex-wrap: wrap;
+}
+
+.tc-chat-participants {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  cursor: pointer;
+  color: var(--text-subtle);
+  min-width: 0;
+}
+
+.tc-chat-chip {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-h);
+  padding: 3px var(--space-3);
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  /* Character names have no spaces to break on — keep each chip on one line
+     and let the wrapping .tc-chat-participants row move whole chips down
+     instead of squeezing the text per character. */
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+
+.tc-chat-muted {
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.tc-chat-room-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+  /* Three labelled buttons plus the turn counter don't fit next to the
+     participant chips on a phone-width screen — wrap onto extra lines
+     rather than overflow (flex-shrink: 0 above means this row would
+     otherwise push past the container edge). */
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.tc-chat-turncap {
+  font-size: 0.78rem;
+  color: var(--text-subtle);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* --- participant picker -------------------------------------------------- */
+
+.tc-chat-picker {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  padding: var(--space-4) var(--space-5);
+}
+
+.tc-chat-picker-head {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-h);
+  margin-bottom: var(--space-3);
+}
+
+.tc-chat-picker-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.tc-chat-picker-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  /* Keep the character name on one line; the wrapping .tc-chat-picker-grid
+     moves whole pills to the next line instead of squeezing the label. */
+  white-space: nowrap;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+
+.tc-chat-picker-item:hover {
+  background: var(--surface-hover);
+}
+
+.tc-chat-picker-item.selected {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--text-h);
+  box-shadow: var(--shadow-1);
+}
+
+.tc-chat-picker-check {
+  color: var(--accent);
+}
+
+/* --- transcript ---------------------------------------------------------- */
+
+.tc-chat-transcript {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.tc-chat-msg {
+  display: flex;
+  gap: var(--space-3);
+  max-width: 80%;
+  /* Runs once on mount only — the text node updates in place while streaming
+     (same DOM node, no remount), so this never restarts mid-stream. */
+  animation: tc-chat-msg-in var(--dur-fast) var(--ease-out);
+}
+
+@keyframes tc-chat-msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.tc-chat-msg.user {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+.tc-chat-msg-avatar {
+  flex-shrink: 0;
+}
+
+.tc-chat-msg-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tc-chat-msg.user .tc-chat-msg-body {
+  align-items: flex-end;
+}
+
+.tc-chat-msg-name {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.tc-chat-msg-text {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  border-top-left-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+  color: var(--text-h);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+  box-shadow: var(--shadow-1);
+}
+
+.tc-chat-msg.user .tc-chat-msg-text {
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+  border-top-left-radius: var(--radius-lg);
+  border-top-right-radius: var(--radius-sm);
+}
+
+.tc-chat-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: tc-chat-blink 1s steps(2, start) infinite;
+}
+
+@keyframes tc-chat-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* --- composer ------------------------------------------------------------ */
+
+.tc-chat-error {
+  padding: var(--space-2) var(--space-5);
+  color: var(--danger);
+  background: var(--danger-bg);
+  font-size: 0.85rem;
+}
+
+.tc-chat-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-5);
+  color: var(--accent);
+  background: var(--accent-bg);
+  font-size: 0.85rem;
+}
+
+.tc-chat-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  position: relative;
+  z-index: 1;
+}
+
+.tc-chat-textarea {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  max-height: 160px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-h);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  font: inherit;
+  line-height: 1.5;
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+
+.tc-chat-textarea:hover:not(:focus-visible) {
+  background: var(--surface-hover);
+}
+
+.tc-chat-textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.tc-chat-send {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* --- responsive ------------------------------------------------------------ */
+
+@media (max-width: 768px) {
+  /* The fixed 240px sidebar leaves almost no width for the chat room on a
+     phone (e.g. ~120px on a 360px screen), which is what squeezes the room
+     header/composer down to one-character-per-line. Stack the sidebar above
+     the room instead, capped to a scrollable strip so the active
+     conversation keeps most of the vertical space. */
+  .tc-chat {
+    flex-direction: column;
+  }
+
+  .tc-chat-sidebar {
+    width: 100%;
+    max-height: 32vh;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="TC Town — VRM/image characters you talk with, grow personalities with, and let converse with each other" />
+    <meta name="color-scheme" content="light dark" />
+    <title>TC Town</title>
+    <!-- Apply the saved theme before first paint to avoid a flash of the wrong
+         theme (FOUC). Mirrors applyTheme() in useAppSettings: explicit
+         light/dark stamp data-theme; "system" (or no choice) is left unset so
+         the prefers-color-scheme media query in index.css takes over. Default
+         with no stored settings is light. -->
+    <script>
+      (function () {
+        try {
+          var raw = localStorage.getItem('tc-town:app-settings');
+          var theme = raw ? JSON.parse(raw).theme : 'light';
+          if (theme === 'dark' || theme === 'light') {
+            document.documentElement.setAttribute('data-theme', theme);
+          } else if (!theme) {
+            document.documentElement.setAttribute('data-theme', 'light');
+          }
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'light');
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
