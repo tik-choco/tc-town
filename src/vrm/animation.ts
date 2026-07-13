@@ -80,6 +80,13 @@ export function createVrmAnimator(vrm: VRM, lookAtTarget?: THREE.Object3D): VrmA
   const humanoid = vrm.humanoid
   const leftUpperArm = humanoid?.getNormalizedBoneNode('leftUpperArm') ?? null
   const rightUpperArm = humanoid?.getNormalizedBoneNode('rightUpperArm') ?? null
+  const leftLowerArm = humanoid?.getNormalizedBoneNode('leftLowerArm') ?? null
+  const rightLowerArm = humanoid?.getNormalizedBoneNode('rightLowerArm') ?? null
+  // VRM0/1 rigs can bake a 180° residual into the rest pose (see rotateVRM0
+  // above), which flips which Z sign actually points the arm down — derive it
+  // from the lowerArm rest position instead of assuming a fixed sign.
+  const leftArmSign = leftLowerArm && leftLowerArm.position.x !== 0 ? -Math.sign(leftLowerArm.position.x) : 1
+  const rightArmSign = rightLowerArm && rightLowerArm.position.x !== 0 ? -Math.sign(rightLowerArm.position.x) : -1
   // Breathing bone: prefer upperChest, falling back to chest, then spine.
   const breathBone =
     humanoid?.getNormalizedBoneNode('upperChest') ??
@@ -96,8 +103,8 @@ export function createVrmAnimator(vrm: VRM, lookAtTarget?: THREE.Object3D): VrmA
 
   // Apply the arms-down stance immediately so the model never renders (even
   // for one frame) in its raw T-pose.
-  leftUpperArm?.rotation.set(0, 0, ARM_DOWN_ANGLE)
-  rightUpperArm?.rotation.set(0, 0, -ARM_DOWN_ANGLE)
+  leftUpperArm?.rotation.set(0, 0, leftArmSign * ARM_DOWN_ANGLE)
+  rightUpperArm?.rotation.set(0, 0, rightArmSign * ARM_DOWN_ANGLE)
 
   let blinkTimer = randomBlinkInterval()
   let blinkElapsed = 0
@@ -142,8 +149,8 @@ export function createVrmAnimator(vrm: VRM, lookAtTarget?: THREE.Object3D): VrmA
   return {
     update(deltaSeconds, speaking, emotion) {
       // --- Standing pose: keep the arms-down base rotation every frame. ---
-      leftUpperArm?.rotation.set(0, 0, ARM_DOWN_ANGLE)
-      rightUpperArm?.rotation.set(0, 0, -ARM_DOWN_ANGLE)
+      leftUpperArm?.rotation.set(0, 0, leftArmSign * ARM_DOWN_ANGLE)
+      rightUpperArm?.rotation.set(0, 0, rightArmSign * ARM_DOWN_ANGLE)
 
       // --- Idle sway: tiny sinusoidal breathing/chest/spine/head motion,
       // layered on top of the standing pose's base rotations. ---
