@@ -20,6 +20,12 @@ const DIRECTORY_KEY = "tc-town:catalog-directory-v1";
 const WIRELOG_KEY = "tc-town:catalog-wirelog-v1";
 const PROFILE_KEY = "tc-town:catalog-profile-v1";
 const MAX_WIRE_LOG = 600;
+// The directory learns entries from whatever the network tells it, with no
+// upper bound of its own — an active swarm could grow it indefinitely.
+// receivedAt is refreshed on every upsert (new publish or re-learn of an
+// existing entry), so it doubles as a recency signal: evict the
+// least-recently-received entries once the cap is exceeded.
+const MAX_DIRECTORY_ENTRIES = 500;
 
 function isStringField(value: unknown): value is string {
   return typeof value === "string";
@@ -198,9 +204,20 @@ export function getCatalogEntry(entryId: string): CatalogEntry | null {
   return readDirectory()[entryId] ?? null;
 }
 
+/** Evicts the least-recently-received entries in place once the directory exceeds MAX_DIRECTORY_ENTRIES. Exported for tests. */
+export function evictOldestDirectoryEntries(directory: Record<string, CatalogEntry>): void {
+  const entries = Object.values(directory);
+  if (entries.length <= MAX_DIRECTORY_ENTRIES) return;
+  entries
+    .sort((a, b) => a.receivedAt - b.receivedAt)
+    .slice(0, entries.length - MAX_DIRECTORY_ENTRIES)
+    .forEach((entry) => delete directory[entry.entryId]);
+}
+
 export function upsertCatalogEntry(entry: CatalogEntry): void {
   const directory = readDirectory();
   directory[entry.entryId] = entry;
+  evictOldestDirectoryEntries(directory);
   writeDirectory(directory);
 }
 

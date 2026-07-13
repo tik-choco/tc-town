@@ -20,10 +20,11 @@ import {
   ConversationEngine,
   USER_SPEAKER_ID,
   listSessions,
+  getSession,
   createSession,
   deleteSession,
   renameSession,
-  type ConversationSession,
+  type ConversationSessionMeta,
   type EngineState,
   type TranscriptEntry,
 } from "../lib/conversation";
@@ -75,18 +76,35 @@ function speakerColor(speakerId: string): string {
 }
 
 export function ChatView() {
-  const [sessions, setSessions] = useState<ConversationSession[]>(() => listSessions());
+  const [sessions, setSessions] = useState<ConversationSessionMeta[]>(() => listSessions());
   const [activeId, setActiveId] = useState<string | null>(() => listSessions()[0]?.id ?? null);
   const [characters, setCharacters] = useState<Character[]>(() => listCharacters());
 
   const refreshSessions = () => setSessions(listSessions());
 
-  // One engine per active session; recreated when the selection changes.
-  const engine = useMemo(() => {
-    if (!activeId) return null;
-    const session = listSessions().find((s) => s.id === activeId);
-    if (!session) return null;
-    return new ConversationEngine(session);
+  // One engine per active session, (re)loaded asynchronously (the transcript
+  // now lives in mistlib's OPFS-backed KV, not localStorage — see
+  // lib/conversation.ts) whenever the selection changes.
+  const [engine, setEngine] = useState<ConversationEngine | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(false);
+
+  useEffect(() => {
+    if (!activeId) {
+      setEngine(null);
+      setSessionLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSessionLoading(true);
+    void (async () => {
+      const session = await getSession(activeId);
+      if (cancelled) return;
+      setSessionLoading(false);
+      setEngine(session ? new ConversationEngine(session) : null);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [activeId]);
 
   const [state, setState] = useState<EngineState | null>(() => engine?.getState() ?? null);
@@ -181,6 +199,10 @@ export function ChatView() {
           characters={characters}
           onParticipantsChanged={refreshSessions}
         />
+      ) : sessionLoading ? (
+        <div class="tc-chat-placeholder">
+          <p>読み込み中...</p>
+        </div>
       ) : (
         <div class="tc-chat-placeholder">
           <p>会話を選択するか、新しい会話を作成してください。</p>
@@ -194,7 +216,7 @@ export function ChatView() {
 }
 
 function SessionRow(props: {
-  session: ConversationSession;
+  session: ConversationSessionMeta;
   active: boolean;
   onSelect: () => void;
   onDelete: () => void;

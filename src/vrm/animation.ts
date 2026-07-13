@@ -120,6 +120,16 @@ export function createVrmAnimator(vrm: VRM, lookAtTarget?: THREE.Object3D): VrmA
   // measure every later frame relative to it.
   let gazeRefYaw: number | null = null
   let gazeRefPitch = 0
+  // VRMUtils.rotateVRM0 (loader.ts) bakes a 180° yaw into vrm.scene for VRM0
+  // models AFTER the humanoid's normalized rig is built, so the world-rotation
+  // snapshots three-vrm's VRMHumanoidRig.update() composes with were captured
+  // pre-flip. The rendered head forward then comes out as the full negation of
+  // the "+Z forward" the rotation.x/y writes below assume. Negating a vector
+  // shifts yaw by 180° (absorbed by the gazeRef baseline) but flips the SIGN
+  // of pitch, which no baseline subtraction can absorb — so on VRM0 rigs the
+  // pitch offset must be applied mirrored. The measured yaw/pitch above stay
+  // correct either way (a pure Y rotation never changes atan2(-y, hypot(x,z))).
+  const gazePitchApplySign = vrm.meta?.metaVersion === '0' ? -1 : 1
   const gazeHeadWorldPos = new THREE.Vector3()
   const gazeTargetWorldPos = new THREE.Vector3()
   const gazeDirection = new THREE.Vector3()
@@ -192,7 +202,7 @@ export function createVrmAnimator(vrm: VRM, lookAtTarget?: THREE.Object3D): VrmA
           gazeYaw += (desiredYaw - gazeYaw) * followFactor
           gazePitch += (desiredPitch - gazePitch) * followFactor
           headBone.rotation.y += gazeYaw
-          headBone.rotation.x += gazePitch
+          headBone.rotation.x += gazePitchApplySign * gazePitch
         }
       }
 

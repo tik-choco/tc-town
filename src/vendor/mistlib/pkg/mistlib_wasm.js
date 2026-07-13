@@ -343,6 +343,22 @@ export function storage_add_at(name, data, x, y, z) {
 }
 
 /**
+ * `storage_add` + `storage_pin` with no gap between them for a concurrent
+ * eviction to exploit (SPEC-18). See `StorageEngine::add_pinned`.
+ * @param {string} name
+ * @param {Uint8Array} data
+ * @returns {Promise<string>}
+ */
+export function storage_add_pinned(name, data) {
+    const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.storage_add_pinned(ptr0, len0, ptr1, len1);
+    return ret;
+}
+
+/**
  * @param {string} root_cid
  * @returns {Promise<Uint8Array>}
  */
@@ -350,6 +366,78 @@ export function storage_get(root_cid) {
     const ptr0 = passStringToWasm0(root_cid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
     const ret = wasm.storage_get(ptr0, len0);
+    return ret;
+}
+
+/**
+ * Whether `root_cid` is currently pinned (SPEC-18). See
+ * `StorageEngine::is_pinned`.
+ * @param {string} root_cid
+ * @returns {Promise<boolean>}
+ */
+export function storage_is_pinned(root_cid) {
+    const ptr0 = passStringToWasm0(root_cid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.storage_is_pinned(ptr0, len0);
+    return ret;
+}
+
+/**
+ * @param {string} key
+ * @returns {Promise<void>}
+ */
+export function storage_kv_delete(key) {
+    const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.storage_kv_delete(ptr0, len0);
+    return ret;
+}
+
+/**
+ * @param {string} key
+ * @returns {Promise<Uint8Array | undefined>}
+ */
+export function storage_kv_get(key) {
+    const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.storage_kv_get(ptr0, len0);
+    return ret;
+}
+
+/**
+ * @param {string} key
+ * @param {Uint8Array} data
+ * @returns {Promise<void>}
+ */
+export function storage_kv_set(key, data) {
+    const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.storage_kv_set(ptr0, len0, data);
+    return ret;
+}
+
+/**
+ * Pins `root_cid` so it (and every chunk its manifest references) is
+ * exempt from eviction/decay (SPEC-18). See `StorageEngine::pin`.
+ * @param {string} root_cid
+ * @returns {Promise<void>}
+ */
+export function storage_pin(root_cid) {
+    const ptr0 = passStringToWasm0(root_cid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.storage_pin(ptr0, len0);
+    return ret;
+}
+
+/**
+ * Removes `root_cid`'s pin (SPEC-18). See `StorageEngine::unpin`.
+ * @param {string} root_cid
+ * @returns {Promise<void>}
+ */
+export function storage_unpin(root_cid) {
+    const ptr0 = passStringToWasm0(root_cid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.storage_unpin(ptr0, len0);
     return ret;
 }
 
@@ -1032,37 +1120,37 @@ function __wbg_get_imports() {
             console.warn(arg0);
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 282, function: Function { arguments: [NamedExternref("Event")], shim_idx: 283, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 395, function: Function { arguments: [NamedExternref("Event")], shim_idx: 396, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h19326926141fe941, wasm_bindgen__convert__closures_____invoke__h1328fcfde3f039f3);
             return ret;
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 282, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 283, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 395, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 396, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h19326926141fe941, wasm_bindgen__convert__closures_____invoke__h1328fcfde3f039f3_1);
             return ret;
         },
         __wbindgen_cast_0000000000000003: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 282, function: Function { arguments: [NamedExternref("RTCDataChannelEvent")], shim_idx: 283, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 395, function: Function { arguments: [NamedExternref("RTCDataChannelEvent")], shim_idx: 396, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h19326926141fe941, wasm_bindgen__convert__closures_____invoke__h1328fcfde3f039f3_2);
             return ret;
         },
         __wbindgen_cast_0000000000000004: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 282, function: Function { arguments: [NamedExternref("RTCPeerConnectionIceEvent")], shim_idx: 283, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 395, function: Function { arguments: [NamedExternref("RTCPeerConnectionIceEvent")], shim_idx: 396, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h19326926141fe941, wasm_bindgen__convert__closures_____invoke__h1328fcfde3f039f3_3);
             return ret;
         },
         __wbindgen_cast_0000000000000005: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 282, function: Function { arguments: [NamedExternref("RTCTrackEvent")], shim_idx: 283, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 395, function: Function { arguments: [NamedExternref("RTCTrackEvent")], shim_idx: 396, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h19326926141fe941, wasm_bindgen__convert__closures_____invoke__h1328fcfde3f039f3_4);
             return ret;
         },
         __wbindgen_cast_0000000000000006: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 464, function: Function { arguments: [], shim_idx: 465, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 510, function: Function { arguments: [], shim_idx: 511, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__hf1eac46c7b14bbfe, wasm_bindgen__convert__closures_____invoke__h56de3da8990075a8);
             return ret;
         },
         __wbindgen_cast_0000000000000007: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 470, function: Function { arguments: [Externref], shim_idx: 471, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 516, function: Function { arguments: [Externref], shim_idx: 517, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__hd9b9648ddf6074bf, wasm_bindgen__convert__closures_____invoke__hd6780872556661f6);
             return ret;
         },
