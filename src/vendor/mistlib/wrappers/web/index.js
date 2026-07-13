@@ -32,6 +32,13 @@ const {
     storage_add: mist_storage_add,
     storage_get: mist_storage_get,
     storage_add_at: mist_storage_add_at,
+    storage_pin: mist_storage_pin,
+    storage_unpin: mist_storage_unpin,
+    storage_is_pinned: mist_storage_is_pinned,
+    storage_add_pinned: mist_storage_add_pinned,
+    storage_kv_set: mist_storage_kv_set,
+    storage_kv_get: mist_storage_kv_get,
+    storage_kv_delete: mist_storage_kv_delete,
 } = mistWasm;
 
 export const EVENT_RAW = 0;
@@ -53,6 +60,15 @@ export const DELIVERY_UNRELIABLE = 2;
 export const storage_add = mist_storage_add;
 export const storage_get = mist_storage_get;
 export const storage_add_at = mist_storage_add_at;
+// Pinning (SPEC-18): durable roots excluded from eviction/decay.
+export const storage_pin = mist_storage_pin;
+export const storage_unpin = mist_storage_unpin;
+export const storage_is_pinned = mist_storage_is_pinned;
+export const storage_add_pinned = mist_storage_add_pinned;
+// Mutable local KV (SPEC-17): OPFS-backed, same-origin shared, not P2P-replicated.
+export const storage_kv_set = mist_storage_kv_set;
+export const storage_kv_get = mist_storage_kv_get;
+export const storage_kv_delete = mist_storage_kv_delete;
 
 let activeNode = null;
 let wasmInitPromise = null;

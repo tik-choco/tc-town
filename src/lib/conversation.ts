@@ -17,6 +17,7 @@ import { requestChatCompletion } from "./llm";
 import { listCharacters, getCharacter, toPersonaPrompt } from "./characterStorage";
 import { getWorld } from "./worlds";
 import { maybeClassifyEmotion } from "./emotionClassifier";
+import { getNode, storage_kv_get, storage_kv_set, storage_kv_delete } from "./mistClient";
 
 /** Once a streamed reply reaches this length, fire the emotion classifier early instead of waiting for the full text — keeps the expression change from lagging noticeably behind a long reply. */
 const EMOTION_CLASSIFY_MIN_LENGTH = 60;
@@ -72,10 +73,32 @@ export const DEFAULT_CONVERSATION_CONFIG: ConversationConfig = {
 };
 
 // -----------------------------------------------------------------------------
-// Persistence (localStorage, defensive parsing)
+// Persistence
 // -----------------------------------------------------------------------------
+//
+// Session metadata (id/title/participantIds/timestamps) lives in the small
+// `tc-town:conversations` localStorage array. The transcript itself — the
+// part that grows without bound as a conversation goes on — is kept out of
+// localStorage entirely and persisted per-session via mistlib's OPFS-backed
+// KV (storage_kv_set/get/delete) under `tc-town:conversation:<sessionId>`,
+// same shared-origin quota concern tc-books hit with its own unbounded
+// localStorage transcript.
+//
+// Backward compat: older localStorage records still have the transcript
+// inlined (`{ ..., transcript: TranscriptEntry[] }`). getSession() dual-reads
+// — an inline transcript array, if present on the raw record, wins over the
+// KV copy — and loadSessionMetas() kicks off a one-time best-effort
+// migration that copies every such inline transcript into KV and then slims
+// the localStorage record down to metadata only. The migration only rewrites
+// localStorage after every transcript it touched has been confirmed written
+// to KV, so a failure partway through leaves the old inline data intact and
+// simply retries on the next load.
 
 const SESSIONS_KEY = "tc-town:conversations";
+
+function transcriptKvKey(sessionId: string): string {
+  return `tc-town:conversation:${sessionId}`;
+}
 
 function newId(): string {
   try {
@@ -104,62 +127,190 @@ function coerceTranscriptEntry(value: unknown): TranscriptEntry | null {
   return { id: value.id, speakerId: value.speakerId, text: value.text, timestamp: value.timestamp, latencyMs };
 }
 
-function coerceSession(value: unknown): ConversationSession | null {
+function coerceTranscript(value: unknown): TranscriptEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(coerceTranscriptEntry).filter((e): e is TranscriptEntry => e !== null);
+}
+
+/** Session metadata only — what actually lives in the `tc-town:conversations` localStorage array. */
+export interface ConversationSessionMeta {
+  id: string;
+  title: string;
+  participantIds: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+function coerceSessionMeta(value: unknown): ConversationSessionMeta | null {
   if (!value || typeof value !== "object") return null;
   const s = value as Record<string, unknown>;
   if (typeof s.id !== "string") return null;
   const participantIds = Array.isArray(s.participantIds)
     ? s.participantIds.filter((x): x is string => typeof x === "string")
     : [];
-  const transcript = Array.isArray(s.transcript)
-    ? s.transcript.map(coerceTranscriptEntry).filter((e): e is TranscriptEntry => e !== null)
-    : [];
   const now = Date.now();
   return {
     id: s.id,
     title: typeof s.title === "string" && s.title.trim() ? s.title : "無題の会話",
     participantIds,
-    transcript,
     createdAt: typeof s.createdAt === "number" ? s.createdAt : now,
     updatedAt: typeof s.updatedAt === "number" ? s.updatedAt : now,
   };
 }
 
-export function loadSessions(): ConversationSession[] {
+/** Legacy (pre-migration) records still carry their transcript inline. Returns it, or null if this record is already metadata-only. */
+function inlineTranscriptOf(value: unknown): unknown[] | null {
+  if (!value || typeof value !== "object") return null;
+  const t = (value as Record<string, unknown>).transcript;
+  return Array.isArray(t) ? t : null;
+}
+
+function readRawSessions(): unknown[] {
   try {
     const raw = localStorage.getItem(SESSIONS_KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    const sessions = parsed.map(coerceSession).filter((s): s is ConversationSession => s !== null);
-    sessions.sort((a, b) => b.updatedAt - a.updatedAt);
-    return sessions;
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
 }
 
-function persistSessions(sessions: ConversationSession[]): void {
+function persistSessionMetas(metas: ConversationSessionMeta[]): void {
   try {
-    localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
-  } catch {
-    // Storage full / unavailable — non-fatal for an in-memory session.
+    localStorage.setItem(SESSIONS_KEY, JSON.stringify(metas));
+  } catch (error) {
+    console.warn("conversation: failed to persist session list", error);
   }
 }
 
-/** All sessions, most-recently-updated first. */
-export function listSessions(): ConversationSession[] {
-  return loadSessions();
+// --- transcript KV read/write -----------------------------------------------
+
+async function loadTranscript(sessionId: string): Promise<TranscriptEntry[]> {
+  try {
+    await getNode();
+    const bytes = await storage_kv_get(transcriptKvKey(sessionId));
+    if (!bytes || bytes.length === 0) return [];
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    return coerceTranscript(parsed);
+  } catch (error) {
+    console.warn("conversation: failed to load transcript from storage", sessionId, error);
+    return [];
+  }
 }
 
-export function getSession(id: string): ConversationSession | undefined {
-  return loadSessions().find((s) => s.id === id);
+async function persistTranscriptUnsafe(sessionId: string, transcript: TranscriptEntry[]): Promise<void> {
+  await getNode();
+  const bytes = new TextEncoder().encode(JSON.stringify(transcript));
+  await storage_kv_set(transcriptKvKey(sessionId), bytes);
+}
+
+// Per-session write queue so two overlapping saves (e.g. a fast auto-turn
+// sequence, or an organic save racing the one-time legacy migration below)
+// can never land out of order — each write waits for the previous one for
+// the same session to settle before starting, so whichever call was queued
+// *last* is always the one left standing.
+const transcriptWriteQueues = new Map<string, Promise<void>>();
+
+function enqueueTranscriptWrite(sessionId: string, transcript: TranscriptEntry[]): Promise<void> {
+  const prior = transcriptWriteQueues.get(sessionId) ?? Promise.resolve();
+  const next = prior
+    .then(() => persistTranscriptUnsafe(sessionId, transcript))
+    .catch((error) => {
+      console.warn("conversation: failed to persist transcript", sessionId, error);
+    });
+  transcriptWriteQueues.set(sessionId, next);
+  return next;
+}
+
+function persistTranscript(sessionId: string, transcript: TranscriptEntry[]): void {
+  void enqueueTranscriptWrite(sessionId, transcript);
+}
+
+async function deleteTranscript(sessionId: string): Promise<void> {
+  try {
+    await getNode();
+    await storage_kv_delete(transcriptKvKey(sessionId));
+  } catch (error) {
+    console.warn("conversation: failed to delete transcript from storage", sessionId, error);
+  }
+}
+
+// --- one-time legacy migration -----------------------------------------------
+
+let migrationStarted = false;
+
+/** Best-effort, once per page load: if any session record still has its transcript inlined, copy every one of them into KV, then (only once all succeeded) rewrite localStorage with metadata-only records. Retries on the next load if it fails partway. */
+async function migrateLegacySessions(legacyEntries: Array<Record<string, unknown>>): Promise<void> {
+  try {
+    for (const entry of legacyEntries) {
+      if (typeof entry.id !== "string") continue;
+      // If the app already independently saved this session (e.g. the user
+      // sent a message in it before migration got here), that save already
+      // queued the authoritative newest transcript — queueing our stale
+      // migration snapshot after it would win the race and clobber it. Skip;
+      // the organic write already covers this session's KV copy.
+      if (transcriptWriteQueues.has(entry.id)) continue;
+      await enqueueTranscriptWrite(entry.id, coerceTranscript(entry.transcript));
+    }
+    const slimmed = readRawSessions().map((raw) => coerceSessionMeta(raw) ?? raw);
+    localStorage.setItem(SESSIONS_KEY, JSON.stringify(slimmed));
+  } catch (error) {
+    console.warn("conversation: legacy transcript migration failed; will retry next load", error);
+    migrationStarted = false;
+  }
+}
+
+function scheduleLegacyMigration(rawList: unknown[]): void {
+  if (migrationStarted) return;
+  const legacy = rawList.filter((v) => inlineTranscriptOf(v) !== null) as Array<Record<string, unknown>>;
+  if (legacy.length === 0) return;
+  migrationStarted = true;
+  void migrateLegacySessions(legacy);
+}
+
+// --- public API ---------------------------------------------------------------
+
+/** All session metadata (no transcript), most-recently-updated first. Also kicks off the one-time legacy-transcript migration if needed. */
+export function loadSessionMetas(): ConversationSessionMeta[] {
+  const rawList = readRawSessions();
+  const metas = rawList.map(coerceSessionMeta).filter((s): s is ConversationSessionMeta => s !== null);
+  metas.sort((a, b) => b.updatedAt - a.updatedAt);
+  scheduleLegacyMigration(rawList);
+  return metas;
+}
+
+/** All sessions, most-recently-updated first (metadata only — no transcript; see getSession() for the full session). */
+export function listSessions(): ConversationSessionMeta[] {
+  return loadSessionMetas();
+}
+
+/** Loads one session's full state, including its transcript (dual-read: inline legacy data if present, else KV). */
+export async function getSession(id: string): Promise<ConversationSession | undefined> {
+  const rawList = readRawSessions();
+  const rawEntry = rawList.find(
+    (v) => v && typeof v === "object" && (v as Record<string, unknown>).id === id,
+  );
+  const meta = coerceSessionMeta(rawEntry);
+  if (!meta) return undefined;
+
+  const inline = inlineTranscriptOf(rawEntry);
+  const transcript = inline !== null ? coerceTranscript(inline) : await loadTranscript(id);
+
+  return { ...meta, transcript };
 }
 
 export function saveSession(session: ConversationSession): void {
-  const sessions = loadSessions().filter((s) => s.id !== session.id);
-  sessions.push(session);
-  persistSessions(sessions);
+  const metas = loadSessionMetas().filter((s) => s.id !== session.id);
+  metas.push({
+    id: session.id,
+    title: session.title,
+    participantIds: [...session.participantIds],
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+  });
+  persistSessionMetas(metas);
+  persistTranscript(session.id, session.transcript);
 }
 
 export function createSession(title?: string, participantIds: string[] = []): ConversationSession {
@@ -177,16 +328,17 @@ export function createSession(title?: string, participantIds: string[] = []): Co
 }
 
 export function renameSession(id: string, title: string): void {
-  const sessions = loadSessions();
-  const target = sessions.find((s) => s.id === id);
+  const metas = loadSessionMetas();
+  const target = metas.find((s) => s.id === id);
   if (!target) return;
   target.title = title.trim() || target.title;
   target.updatedAt = Date.now();
-  persistSessions(sessions);
+  persistSessionMetas(metas);
 }
 
 export function deleteSession(id: string): void {
-  persistSessions(loadSessions().filter((s) => s.id !== id));
+  persistSessionMetas(loadSessionMetas().filter((s) => s.id !== id));
+  void deleteTranscript(id);
 }
 
 // -----------------------------------------------------------------------------

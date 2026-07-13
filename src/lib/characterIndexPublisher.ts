@@ -5,26 +5,35 @@
 // — tc-travel's reader is built against this exact shape, so keep it in sync
 // deliberately rather than reshaping opportunistically.
 //
-// Two independent concerns are kept separate on purpose:
-//  - Publishing the index itself is pure localStorage (via publishShared) and
-//    must never wait on or trigger the mist node.
-//  - VRM CID enrichment is best-effort background work that talks to mist
-//    (storage_add), which lazily connects the node the first time it's
-//    called. It never blocks or gates the plain index publish.
+// The full index (personaPrompt included, potentially large across many
+// characters) is never written into localStorage directly: it's JSON'd and
+// handed to mistlib's storage_add to get a CID, and only a slim per-entry
+// summary (personaPrompt stripped — see contract E) plus that CID goes into
+// the sharedBus record. This mirrors townBackupPublisher.ts's "town-backup"
+// topic, which CID's its (encrypted) body the same way. Because publishing
+// now needs storage_add, and thus the mist node, the first publish is
+// deferred by INITIAL_PUBLISH_DELAY_MS after startup (same reasoning as
+// townBackupPublisher's INITIAL_DELAY_MS) so it never blocks boot; every
+// publish after that is queued (never overlapping) via enqueuePublish().
+//
+// VRM CID enrichment is a separate, independent concern: best-effort
+// background work that talks to mist (storage_add) to resolve avatar CIDs,
+// re-publishing the index (via enqueuePublish) if anything new was cached.
 
 import { listCharacters, subscribeCharacters, toPersonaPrompt } from "./characterStorage";
 import { getWorld, subscribeWorlds } from "./worlds";
 import { publishShared } from "./sharedBus";
 import { getVrmBytesForAvatar } from "../vrm/library";
-import { storage_add } from "./mistClient";
+import { getNode, storage_add } from "./mistClient";
 import type { Character } from "../types";
 
 const TOPIC = "character-index";
 const CID_CACHE_KEY = "tc-town:vrm-cid-cache-v1";
 const DEBOUNCE_MS = 1000;
 const ENRICH_INITIAL_DELAY_MS = 5000;
+const INITIAL_PUBLISH_DELAY_MS = 5000;
 
-/** Fixed cross-app contract — tc-travel is built against this exact shape. */
+/** Fixed cross-app contract — tc-travel is built against this exact shape. This is the FULL index, including each entry's personaPrompt; it's never written to localStorage directly — see storage_add in publishIndexUnsafe(). */
 export interface CharacterIndexEntry {
   id: string;
   name: string;
@@ -43,6 +52,16 @@ export interface CharacterIndexMeta {
   v: 1;
   updatedAt: string;
   entries: CharacterIndexEntry[];
+}
+
+/** Slim per-entry shape (personaPrompt omitted, contract E) that goes inline into the sharedBus `meta` for one-glance listing. tc-travel falls back to storage_get(cid) on the full CharacterIndexMeta above when it needs an entry's personaPrompt. */
+export type CharacterIndexEntryMeta = Omit<CharacterIndexEntry, "personaPrompt">;
+
+/** Fixed cross-app contract — tc-travel is built against this exact shape. */
+export interface CharacterIndexMetaSlim {
+  v: 1;
+  updatedAt: string;
+  entries: CharacterIndexEntryMeta[];
 }
 
 // --- VRM checksum -> mist CID cache -----------------------------------------
@@ -109,14 +128,49 @@ function buildIndex(): CharacterIndexMeta {
   return { v: 1, updatedAt: new Date().toISOString(), entries };
 }
 
-/** Pure localStorage publish — never waits on or triggers the mist node. */
-function publishIndex(): void {
+function stripPersonaPrompt(entry: CharacterIndexEntry): CharacterIndexEntryMeta {
+  const meta: CharacterIndexEntryMeta = {
+    id: entry.id,
+    name: entry.name,
+    summary: entry.summary,
+    updatedAt: entry.updatedAt,
+  };
+  if (entry.vrmChecksum) meta.vrmChecksum = entry.vrmChecksum;
+  if (entry.vrmCid) meta.vrmCid = entry.vrmCid;
+  if (entry.vrmFileName) meta.vrmFileName = entry.vrmFileName;
+  if (entry.voiceModel) meta.voiceModel = entry.voiceModel;
+  if (entry.voiceName) meta.voiceName = entry.voiceName;
+  return meta;
+}
+
+function toSlimIndex(index: CharacterIndexMeta): CharacterIndexMetaSlim {
+  return { v: index.v, updatedAt: index.updatedAt, entries: index.entries.map(stripPersonaPrompt) };
+}
+
+/** Uploads the full index (personaPrompt included) via storage_add and publishes the CID + a slim meta. Throws on failure — callers must catch. */
+async function publishIndexUnsafe(): Promise<void> {
+  const index = buildIndex();
+  await getNode();
+  const bytes = new TextEncoder().encode(JSON.stringify(index));
+  const cid = await storage_add("character-index.json", bytes);
+  const slim = toSlimIndex(index);
+  publishShared(TOPIC, cid, slim as unknown as Record<string, unknown>);
+}
+
+async function publishIndex(): Promise<void> {
   try {
-    const meta = buildIndex();
-    publishShared(TOPIC, "", meta as unknown as Record<string, unknown>);
+    await publishIndexUnsafe();
   } catch (error) {
     console.warn("characterIndexPublisher: failed to publish character index", error);
   }
+}
+
+// Serialized so two publishes never race each other into an older CID
+// overwriting a newer one (same pattern as townBackupPublisher's inFlight).
+let inFlight: Promise<void> = Promise.resolve();
+
+function enqueuePublish(): void {
+  inFlight = inFlight.then(() => publishIndex()).catch(() => {});
 }
 
 // --- Debounced re-publish on character/world change --------------------------
@@ -127,7 +181,7 @@ function schedulePublish(): void {
   if (debounceTimer !== null) clearTimeout(debounceTimer);
   debounceTimer = setTimeout(() => {
     debounceTimer = null;
-    publishIndex();
+    enqueuePublish();
   }, DEBOUNCE_MS);
 }
 
@@ -185,22 +239,28 @@ async function runEnrichmentPass(): Promise<void> {
       // safety net so one bad avatar never aborts the whole pass.
     }
   }
-  if (changed) publishIndex();
+  if (changed) enqueuePublish();
 }
 
 let started = false;
 
 /**
- * Starts the character-index publisher: publishes now, then re-publishes
- * (debounced) on every character/world change, and schedules a low-priority
- * background pass to enrich VRM avatars with mist storage CIDs. Idempotent —
- * safe to call more than once (subsequent calls are no-ops).
+ * Starts the character-index publisher: publishes shortly after startup
+ * (delayed by INITIAL_PUBLISH_DELAY_MS so the mist node connection required
+ * by storage_add never blocks boot — mirrors townBackupPublisher), then
+ * re-publishes (debounced) on every character/world change, and schedules a
+ * low-priority background pass to enrich VRM avatars with mist storage CIDs.
+ * Idempotent — safe to call more than once (subsequent calls are no-ops).
  */
 export function startCharacterIndexPublisher(): void {
   if (started) return;
   started = true;
 
-  publishIndex();
+  if (typeof window !== "undefined") {
+    setTimeout(() => enqueuePublish(), INITIAL_PUBLISH_DELAY_MS);
+  } else {
+    enqueuePublish();
+  }
 
   subscribeCharacters(() => schedulePublish());
   subscribeWorlds(() => schedulePublish());

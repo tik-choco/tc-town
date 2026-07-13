@@ -21,6 +21,13 @@ export function defaultConfig(): Record<string, unknown>;
 export function storage_add(name: string, data: Uint8Array): Promise<string>;
 export function storage_get(rootCid: string): Promise<Uint8Array>;
 export function storage_add_at(name: string, data: Uint8Array, x: number, y: number, z: number): Promise<string>;
+export function storage_pin(rootCid: string): Promise<void>;
+export function storage_unpin(rootCid: string): Promise<void>;
+export function storage_is_pinned(rootCid: string): Promise<boolean>;
+export function storage_add_pinned(name: string, data: Uint8Array): Promise<string>;
+export function storage_kv_set(key: string, data: Uint8Array): Promise<void>;
+export function storage_kv_get(key: string): Promise<Uint8Array | undefined>;
+export function storage_kv_delete(key: string): Promise<void>;
 
 export type DeliveryMethod =
     | typeof DELIVERY_RELIABLE

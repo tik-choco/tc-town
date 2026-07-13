@@ -4,8 +4,13 @@
 // lib/catalog.ts's module doc for why that's required for the coercion
 // helpers to live safely in lib/catalogStore.ts / lib/catalogTypes.ts.
 import { describe, expect, it } from "vitest";
-import { coerceCatalogPayload } from "./catalogTypes";
-import { coerceCatalogEntry, coerceCatalogProfile, coercePublishState } from "./catalogStore";
+import { coerceCatalogPayload, type CatalogEntry } from "./catalogTypes";
+import {
+  coerceCatalogEntry,
+  coerceCatalogProfile,
+  coercePublishState,
+  evictOldestDirectoryEntries,
+} from "./catalogStore";
 import { parseCatalogShareInput } from "./catalog";
 
 describe("coercePublishState", () => {
@@ -65,6 +70,40 @@ describe("coerceCatalogEntry", () => {
     expect(coerceCatalogEntry({ cid: "x", fromId: "did:key:z1" })).toBeNull();
     expect(coerceCatalogEntry({ entryId: "e1", fromId: "did:key:z1" })).toBeNull();
     expect(coerceCatalogEntry({ entryId: "e1", cid: "x" })).toBeNull();
+  });
+});
+
+describe("evictOldestDirectoryEntries", () => {
+  function entry(entryId: string, receivedAt: number): CatalogEntry {
+    return {
+      entryId,
+      name: "",
+      summary: "",
+      hasVrm: false,
+      cid: "bafy",
+      fromId: "did:key:z1",
+      fromName: "",
+      publishedAt: receivedAt,
+      updatedAt: receivedAt,
+      receivedAt,
+    };
+  }
+
+  it("leaves the directory untouched when under the cap", () => {
+    const directory: Record<string, CatalogEntry> = { a: entry("a", 1), b: entry("b", 2) };
+    evictOldestDirectoryEntries(directory);
+    expect(Object.keys(directory)).toEqual(["a", "b"]);
+  });
+
+  it("drops the least-recently-received entries once over the cap", () => {
+    // 501 entries, receivedAt 0..500 — only the single oldest (id "0") should be evicted.
+    const directory: Record<string, CatalogEntry> = {};
+    for (let i = 0; i <= 500; i++) directory[String(i)] = entry(String(i), i);
+    evictOldestDirectoryEntries(directory);
+    expect(Object.keys(directory).length).toBe(500);
+    expect(directory["0"]).toBeUndefined();
+    expect(directory["1"]).toBeDefined();
+    expect(directory["500"]).toBeDefined();
   });
 });
 

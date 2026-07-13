@@ -56,7 +56,36 @@ export function storage_add(name: string, data: Uint8Array): Promise<string>;
  */
 export function storage_add_at(name: string, data: Uint8Array, x: number, y: number, z: number): Promise<string>;
 
+/**
+ * `storage_add` + `storage_pin` with no gap between them for a concurrent
+ * eviction to exploit (SPEC-18). See `StorageEngine::add_pinned`.
+ */
+export function storage_add_pinned(name: string, data: Uint8Array): Promise<string>;
+
 export function storage_get(root_cid: string): Promise<Uint8Array>;
+
+/**
+ * Whether `root_cid` is currently pinned (SPEC-18). See
+ * `StorageEngine::is_pinned`.
+ */
+export function storage_is_pinned(root_cid: string): Promise<boolean>;
+
+export function storage_kv_delete(key: string): Promise<void>;
+
+export function storage_kv_get(key: string): Promise<Uint8Array | undefined>;
+
+export function storage_kv_set(key: string, data: Uint8Array): Promise<void>;
+
+/**
+ * Pins `root_cid` so it (and every chunk its manifest references) is
+ * exempt from eviction/decay (SPEC-18). See `StorageEngine::pin`.
+ */
+export function storage_pin(root_cid: string): Promise<void>;
+
+/**
+ * Removes `root_cid`'s pin (SPEC-18). See `StorageEngine::unpin`.
+ */
+export function storage_unpin(root_cid: string): Promise<void>;
 
 export function unpublish_local_track(track_id: string): void;
 
@@ -96,7 +125,14 @@ export interface InitOutput {
     readonly update_position: (a: number, b: number, c: number) => void;
     readonly storage_add: (a: number, b: number, c: number, d: number) => any;
     readonly storage_add_at: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => any;
+    readonly storage_add_pinned: (a: number, b: number, c: number, d: number) => any;
     readonly storage_get: (a: number, b: number) => any;
+    readonly storage_is_pinned: (a: number, b: number) => any;
+    readonly storage_kv_delete: (a: number, b: number) => any;
+    readonly storage_kv_get: (a: number, b: number) => any;
+    readonly storage_kv_set: (a: number, b: number, c: any) => any;
+    readonly storage_pin: (a: number, b: number) => any;
+    readonly storage_unpin: (a: number, b: number) => any;
     readonly wasm_bindgen__closure__destroy__h19326926141fe941: (a: number, b: number) => void;
     readonly wasm_bindgen__closure__destroy__hf1eac46c7b14bbfe: (a: number, b: number) => void;
     readonly wasm_bindgen__closure__destroy__hd9b9648ddf6074bf: (a: number, b: number) => void;
