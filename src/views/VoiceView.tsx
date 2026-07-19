@@ -8,12 +8,14 @@ import { requestChatCompletion } from "../lib/llm";
 import { maybeClassifyEmotion } from "../lib/emotionClassifier";
 import { getWorld } from "../lib/worlds";
 import {
+  createMicSession,
   guessFileName,
+  MIN_VOICED_MS,
   speak,
-  startRecording,
   transcribeAudio,
-  type RecordingHandle,
+  type MicSession,
   type SpeechHandle,
+  type UtteranceHandle,
   type VoiceTarget,
 } from "../lib/voice";
 import { CharacterAvatar } from "../components/CharacterAvatar";
@@ -117,7 +119,8 @@ export function VoiceView() {
 
   const activeRef = useRef(false);
   const mutedRef = useRef(false);
-  const recordingRef = useRef<RecordingHandle | null>(null);
+  const sessionRef = useRef<MicSession | null>(null);
+  const recordingRef = useRef<UtteranceHandle | null>(null);
   const speechRef = useRef<SpeechHandle | null>(null);
   const nextLineId = useRef(0);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
@@ -144,6 +147,8 @@ export function VoiceView() {
       activeRef.current = false;
       recordingRef.current?.cancel();
       speechRef.current?.stop();
+      sessionRef.current?.close();
+      sessionRef.current = null;
     },
     [],
   );
@@ -175,73 +180,121 @@ export function VoiceView() {
     const settings = loadProviderSettings();
     const history: ChatMessage[] = [{ role: "system", content: voicePersonaPrompt(character) }];
 
-    while (activeRef.current) {
-      // Pause listening while muted, without tearing down the call.
-      while (activeRef.current && mutedRef.current) {
-        await sleep(150);
-      }
-      if (!activeRef.current) break;
+    let session: MicSession;
+    try {
+      session = await createMicSession();
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "マイクを利用できませんでした。");
+      activeRef.current = false;
+      setCallActive(false);
+      setStatus("idle");
+      return;
+    }
+    sessionRef.current = session;
 
-      setStatus("listening");
-      setErrorMessage(null);
-      let recording: RecordingHandle;
-      try {
-        recording = await startRecording(settings.sttSilenceDuration);
-      } catch (err) {
-        setErrorMessage(err instanceof Error ? err.message : "マイクを利用できませんでした。");
-        activeRef.current = false;
-        break;
-      }
-      recordingRef.current = recording;
+    try {
+      // Carries a barge-in recording started during TTS playback into the
+      // next listening phase, so the user's interrupting words aren't lost.
+      let pending: UtteranceHandle | null = null;
 
-      let audioBlob: Blob;
-      try {
-        audioBlob = await recording.result;
-      } catch {
+      while (activeRef.current) {
+        // Pause listening while muted, without tearing down the call. Any
+        // recording in flight was cancelled by toggleMute, so `pending` (if
+        // set) will reject below and we'll loop back into this wait.
+        while (activeRef.current && mutedRef.current) {
+          await sleep(150);
+        }
+        if (!activeRef.current) break;
+
+        setStatus("listening");
+        setErrorMessage(null);
+        const rec =
+          pending ?? session.recordUtterance({ rmsThreshold: settings.micThreshold, silenceDurationSec: settings.sttSilenceDuration });
+        pending = null;
+        recordingRef.current = rec;
+
+        let utterance: { blob: Blob; voicedMs: number };
+        try {
+          utterance = await rec.result;
+        } catch {
+          recordingRef.current = null;
+          if (!activeRef.current) break;
+          continue; // cancelled (e.g. muted mid-listen) — loop back and re-check state
+        }
         recordingRef.current = null;
         if (!activeRef.current) break;
-        continue; // cancelled (e.g. muted mid-listen) — loop back and re-check state
+        if (utterance.voicedMs < MIN_VOICED_MS || utterance.blob.size < MIN_RECORDING_BYTES) continue; // noise, keep listening
+
+        setStatus("thinking");
+        let text: string;
+        try {
+          text = await transcribeAudio(sttTarget, utterance.blob, guessFileName(utterance.blob));
+        } catch (err) {
+          setErrorMessage(err instanceof Error ? err.message : "音声認識に失敗しました。");
+          continue;
+        }
+        if (!activeRef.current) break;
+        if (!text.trim()) continue;
+
+        appendLine("user", text);
+        history.push({ role: "user", content: text });
+
+        let reply: string;
+        try {
+          reply = await requestChatCompletion(character.llmProfileId, history);
+        } catch (err) {
+          setErrorMessage(err instanceof Error ? err.message : "応答の生成に失敗しました。");
+          continue;
+        }
+        if (!activeRef.current) break;
+
+        history.push({ role: "assistant", content: reply });
+        appendLine("assistant", reply);
+        // Fire-and-forget: classify the reply's emotion for the VRM face as
+        // soon as the text is settled, without waiting for TTS to finish.
+        maybeClassifyEmotion(character.id, reply, character.llmProfileId);
+
+        setStatus("speaking");
+        setSpeaking(true);
+        const handle = speak(ttsTarget, reply, character.voiceName);
+        speechRef.current = handle;
+        let bargedIn = false;
+        if (settings.bargeInEnabled && !mutedRef.current) {
+          // Barge-in: listen while the character talks; sustained user voice
+          // stops playback immediately, and the recording carries into the
+          // next loop iteration via `pending` so nothing the user said is lost.
+          pending = session.recordUtterance({
+            rmsThreshold: settings.micThreshold,
+            silenceDurationSec: settings.sttSilenceDuration,
+            deferRecordUntilSpeech: true,
+            onSpeechStart: () => {
+              bargedIn = true;
+              handle.stop();
+            },
+          });
+          recordingRef.current = pending;
+          // `pending` isn't awaited until the next iteration (or ever, if the
+          // call ends first) — mark an early cancel()'s rejection as handled
+          // so it doesn't surface as an unhandled promise rejection. The
+          // `await rec.result` in the next iteration still sees the rejection.
+          pending.result.catch(() => {});
+        }
+        await handle.done;
+        speechRef.current = null;
+        setSpeaking(false);
+        if (pending && !bargedIn) {
+          // Playback finished without an interruption: drop the deferred
+          // recording (its recorder never started, so it would clip the next
+          // utterance's onset) and let the next iteration open a normal
+          // record-from-the-start one instead.
+          pending.cancel();
+          pending = null;
+          recordingRef.current = null;
+        }
       }
-      recordingRef.current = null;
-      if (!activeRef.current) break;
-      if (audioBlob.size < MIN_RECORDING_BYTES) continue; // essentially silence, keep listening
-
-      setStatus("thinking");
-      let text: string;
-      try {
-        text = await transcribeAudio(sttTarget, audioBlob, guessFileName(audioBlob));
-      } catch (err) {
-        setErrorMessage(err instanceof Error ? err.message : "音声認識に失敗しました。");
-        continue;
-      }
-      if (!activeRef.current) break;
-      if (!text.trim()) continue;
-
-      appendLine("user", text);
-      history.push({ role: "user", content: text });
-
-      let reply: string;
-      try {
-        reply = await requestChatCompletion(character.llmProfileId, history);
-      } catch (err) {
-        setErrorMessage(err instanceof Error ? err.message : "応答の生成に失敗しました。");
-        continue;
-      }
-      if (!activeRef.current) break;
-
-      history.push({ role: "assistant", content: reply });
-      appendLine("assistant", reply);
-      // Fire-and-forget: classify the reply's emotion for the VRM face as
-      // soon as the text is settled, without waiting for TTS to finish.
-      maybeClassifyEmotion(character.id, reply, character.llmProfileId);
-
-      setStatus("speaking");
-      setSpeaking(true);
-      const handle = speak(ttsTarget, reply, character.voiceName);
-      speechRef.current = handle;
-      await handle.done;
-      speechRef.current = null;
-      setSpeaking(false);
+    } finally {
+      session.close();
+      sessionRef.current = null;
     }
 
     setStatus("idle");
@@ -263,6 +316,8 @@ export function VoiceView() {
     recordingRef.current = null;
     speechRef.current?.stop();
     speechRef.current = null;
+    sessionRef.current?.close();
+    sessionRef.current = null;
     setCallActive(false);
     setSpeaking(false);
     setStatus("idle");

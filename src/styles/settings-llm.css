@@ -1,0 +1,329 @@
+/* ============================================================
+   Settings — flat connection/model grid cards + タスク行
+   ------------------------------------------------------------
+   Ported from tc-translate's src/styles/settings-llm.css (the
+   reference implementation for the shared AI接続/AI Network/
+   タスク settings UI — see
+   tc-docs/drafts/llm-settings-common-v1.md), token-mapped to
+   tc-town's palette (index.css): --primary → --accent,
+   --primary-soft → --accent-bg, --primary-hover → --accent-hover,
+   --on-primary → --on-accent, --text-muted → --text-subtle,
+   --text-strong → --text-h, --danger-soft → --danger-bg,
+   --radius-s → --radius-sm. No new colors introduced — every var
+   below already exists in index.css. Consumed by views/SettingsView.tsx.
+   ============================================================ */
+
+/* 接続先（Provider）とモデル（Preset）は互いに独立したグリッドカード一覧。
+   階層関係にはしない（片方を開いてももう片方はネストして出さない）。見出し
+   ＋グリッドのみで、2セクションを区別するためだけにカードの背景色を分ける。 */
+.server-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.server-list-header label {
+  margin-bottom: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.settings-flat-section {
+  margin-bottom: var(--space-5);
+}
+
+.model-row-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.model-row {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3) 26px var(--space-3) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+
+.model-row:hover {
+  background: var(--surface-2);
+  box-shadow: var(--shadow-2);
+  transform: translateY(-1px);
+}
+
+/* 接続先/モデル、それぞれのセクションのtintをカード単位に適用する。 */
+.settings-flat-section-connection .model-row {
+  background: var(--accent-bg);
+}
+
+.settings-flat-section-models .model-row {
+  background: var(--surface-3);
+}
+
+.model-row-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.model-row-label {
+  max-width: 100%;
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.model-row-model {
+  max-width: 100%;
+  color: var(--text-subtle);
+  font-size: 0.72rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* モデル行に添える接続先名（どのproviderに属すか）。ネストではなく単なる
+   ラベルとして小さく併記する。 */
+.model-row-provider {
+  max-width: 100%;
+  color: var(--text-subtle);
+  font-size: 0.68rem;
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.model-row-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.task-badge {
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 0.62rem;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}
+
+/* カード右上に置く×削除。カード本体側の padding-right（26px）がテキストと
+   重ならない余白を確保している。 */
+.model-row-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  flex-shrink: 0;
+}
+
+.preset-chip-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: var(--text-subtle);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.preset-chip-remove:hover {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+/* 編集/追加状態のカードはグリッド上の自分の位置のまま全幅に展開する
+   （他のカードはグリッドに残る）。縦積みリスト用スタイルをそのまま
+   フォームレイアウトとして使う。 */
+.model-row.model-row-editing {
+  grid-column: 1 / -1;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  padding: var(--space-3);
+  box-shadow: none;
+  transform: none;
+}
+
+.model-row-edit-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.model-row-add-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+/* グリッド末尾の「追加」タイル。破線枠でカードと区別する。クリックすると
+   同じグリッド位置がそのまま編集フォーム（.model-row-editing、
+   grid-column: 1/-1）に差し替わる。 */
+.grid-add-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 64px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-subtle);
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease);
+}
+
+.grid-add-tile:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.grid-add-tile:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.connection-form-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--border);
+  border: 1px solid var(--border);
+  color: var(--text-subtle);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease);
+  flex: 1 1 auto;
+  white-space: nowrap;
+}
+
+.connection-form-btn:hover {
+  color: var(--text-h);
+  background: var(--surface-2);
+}
+
+.connection-form-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.connection-form-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.connection-form-btn-primary:hover {
+  background: var(--accent-hover);
+  color: var(--on-accent);
+}
+
+/* タスク別モデル割り当て（既定/表情/読み上げ/書き起こし）の1行。ラベルと
+   select群を2カラムグリッドで並べる。 */
+.task-model-item {
+  display: grid;
+  grid-template-columns: 60px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.task-model-item:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.task-model-item > span {
+  font-size: 0.78rem;
+  color: var(--text-subtle);
+  min-width: 0;
+  padding-top: var(--space-3);
+}
+
+/* ラベルのhoverツールチップ。data-tip属性の説明文をラベル直下に表示する。
+   常時表示のヒント段落の代わりに、必要なときだけ出す。タスク行のラベル
+   （.task-model-item > span）に加え、AI Networkタブのrole cardタイトル
+   （.tc-role-title、settings.css）でも使うので `.tc-settings [data-tip]`
+   全体をセレクタにしている。 */
+.tc-settings [data-tip] {
+  position: relative;
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.tc-settings [data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 10;
+  width: max-content;
+  max-width: 240px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  color: var(--text-h);
+  font-size: 0.7rem;
+  line-height: 1.5;
+  box-shadow: var(--shadow-2);
+}
+
+.task-model-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.task-model-field {
+  display: block;
+  min-width: 0;
+}
+
+.task-model-field select {
+  width: 100%;
+  min-width: 0;
+}

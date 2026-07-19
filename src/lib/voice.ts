@@ -7,6 +7,19 @@
 // state live in views/VoiceView.tsx — this module only owns talking to the
 // endpoints, mic capture, and playback.
 //
+// Mic capture is a persistent MicSession (createMicSession) rather than a
+// one-shot recorder: a call keeps one microphone stream + AudioContext open
+// for the whole call and records individual utterances against it. This is
+// what makes barge-in possible — while the character's reply is playing,
+// VoiceView can start a new utterance on the *same* session with
+// deferRecordUntilSpeech, so sustained user speech is both detected (to stop
+// TTS playback immediately) and captured (so the interrupting words aren't
+// lost) without reopening the mic. Voice-activity detection is a simple RMS
+// threshold with a start-voice debounce (resist transients/click noise) and
+// a minimum voiced-duration gate (filter out coughs/room noise from ever
+// reaching STT) — no ML VAD, matching the reference Go implementation this
+// was ported from.
+//
 // @tik-choco/mistai does ship voice helpers (VoiceConsumerService /
 // VoiceProviderService), but those speak the AI Network peer protocol for
 // *sharing* a voice endpoint between devices — they don't call an
@@ -165,27 +178,70 @@ function pickRecorderMimeType(): string | undefined {
   return CANDIDATE_MIME_TYPES.find((candidate) => MediaRecorder.isTypeSupported(candidate));
 }
 
-/** RMS amplitude (0..1) above which the input is considered speech rather than background noise. */
-const SILENCE_RMS_THRESHOLD = 0.02;
+/** Utterances with less sustained voice than this are treated as noise (a
+ * cough, a chair creak, speaker bleed past echo cancellation) and dropped
+ * before ever reaching STT. */
+export const MIN_VOICED_MS = 250;
 
-export interface RecordingHandle {
-  /** Resolves with the captured audio once silence ends the utterance, or `stop()` is called. */
-  result: Promise<Blob>;
+/** Speech onset (VAD "start of voice") requires RMS to stay above threshold
+ * continuously for this long, so a single loud transient doesn't trigger it.
+ * A dip below threshold before the sustain window completes resets the
+ * onset timer. */
+const START_VOICE_MS = 120;
+
+/** During barge-in the mic is open while TTS plays through the speakers, so
+ * echo-cancelled bleed-through can still cause brief false positives even
+ * with echo cancellation enabled. Require a longer sustain window before
+ * treating it as the user actually interrupting. */
+const BARGE_IN_START_VOICE_MS = 250;
+
+export interface UtteranceOptions {
+  /** RMS amplitude (0..1) above which input counts as speech. */
+  rmsThreshold: number;
+  /** End-of-utterance: silence must last this long (seconds) after speech started. */
+  silenceDurationSec: number;
+  /** Fired once, when sustained voice is first detected (speech onset). */
+  onSpeechStart?: () => void;
+  /** Barge-in mode: don't start the MediaRecorder until speech onset, so the
+   * blob doesn't contain the whole TTS playback period the user talked over. */
+  deferRecordUntilSpeech?: boolean;
+}
+
+export interface UtteranceResult {
+  blob: Blob;
+  /** Total milliseconds during which RMS was above threshold (after onset). */
+  voicedMs: number;
+}
+
+export interface UtteranceHandle {
+  /** Resolves once silence ends the utterance or stop() is called; rejects with AbortError on cancel(). */
+  result: Promise<UtteranceResult>;
   /** Ends the utterance immediately and resolves `result` with whatever was captured so far. */
   stop: () => void;
-  /** Aborts the recording without producing a result, rejecting `result`, and releases the mic. */
+  /** Aborts the utterance without producing a result, rejecting `result`. Does not touch the mic/AudioContext. */
   cancel: () => void;
 }
 
+export interface MicSession {
+  /** Starts capturing one utterance. Only one may be active at a time (throws if violated). */
+  recordUtterance(opts: UtteranceOptions): UtteranceHandle;
+  /** Cancels any active utterance and releases the mic/AudioContext. Idempotent. */
+  close(): void;
+}
+
 /**
- * Opens the microphone and starts recording. The returned handle's `result`
- * resolves on its own once the user stops speaking for `silenceDurationSec`
- * seconds (measured via a WebAudio AnalyserNode), or immediately if `stop()`
- * is called first. Always tears down the media stream / audio context, on
- * every exit path, so nothing leaks.
+ * Opens the microphone once and returns a session that can record any
+ * number of utterances against it (sequentially), reusing the same
+ * MediaStream/AudioContext/AnalyserNode across all of them. This is what
+ * lets a call keep listening (for barge-in) while TTS is still speaking,
+ * without the click/pop and permission churn of repeatedly opening the mic.
+ * Echo cancellation matters here specifically because the mic stays open
+ * while audio plays out of the speakers during barge-in listening.
  */
-export async function startRecording(silenceDurationSec: number): Promise<RecordingHandle> {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+export async function createMicSession(): Promise<MicSession> {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+  });
   const audioCtx = new AudioContext();
   const source = audioCtx.createMediaStreamSource(stream);
   const analyser = audioCtx.createAnalyser();
@@ -193,77 +249,131 @@ export async function startRecording(silenceDurationSec: number): Promise<Record
   source.connect(analyser);
   const timeDomainData = new Uint8Array(analyser.frequencyBinCount);
 
-  const recorder = new MediaRecorder(stream, { mimeType: pickRecorderMimeType() });
-  const chunks: BlobPart[] = [];
-  recorder.ondataavailable = (event) => {
-    if (event.data.size > 0) chunks.push(event.data);
-  };
+  let closed = false;
+  // The in-flight utterance's cancel(), doubling as both the "one at a time"
+  // guard and close()'s cleanup hook. Cleared by stop()/cancel() themselves.
+  let currentCancel: (() => void) | null = null;
 
-  let settled = false;
-  let rafId = 0;
-  let resolveResult: (blob: Blob) => void = () => {};
-  let rejectResult: (err: unknown) => void = () => {};
-  const result = new Promise<Blob>((resolve, reject) => {
-    resolveResult = resolve;
-    rejectResult = reject;
-  });
-
-  const releaseMedia = () => {
-    cancelAnimationFrame(rafId);
-    source.disconnect();
-    analyser.disconnect();
-    stream.getTracks().forEach((track) => track.stop());
-    void audioCtx.close().catch(() => {});
-  };
-
-  const stop = () => {
-    if (settled) return;
-    settled = true;
-    releaseMedia();
-    if (recorder.state === "inactive") {
-      resolveResult(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
-    } else {
-      recorder.onstop = () => resolveResult(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
-      recorder.stop();
-    }
-  };
-
-  const cancel = () => {
-    if (settled) return;
-    settled = true;
-    releaseMedia();
-    if (recorder.state !== "inactive") recorder.stop();
-    rejectResult(new DOMException("recording cancelled", "AbortError"));
-  };
-
-  let speechDetected = false;
-  let silenceStartedAt: number | null = null;
-  const watchForSilence = () => {
+  function readRms(): number {
     analyser.getByteTimeDomainData(timeDomainData);
     let sumSquares = 0;
     for (let i = 0; i < timeDomainData.length; i++) {
       const normalized = (timeDomainData[i] - 128) / 128;
       sumSquares += normalized * normalized;
     }
-    const rms = Math.sqrt(sumSquares / timeDomainData.length);
+    return Math.sqrt(sumSquares / timeDomainData.length);
+  }
 
-    if (rms > SILENCE_RMS_THRESHOLD) {
-      speechDetected = true;
-      silenceStartedAt = null;
-    } else if (speechDetected) {
-      const now = performance.now();
-      if (silenceStartedAt === null) {
-        silenceStartedAt = now;
-      } else if (now - silenceStartedAt >= silenceDurationSec * 1000) {
-        stop();
-        return;
+  function recordUtterance(opts: UtteranceOptions): UtteranceHandle {
+    if (closed) throw new Error("mic session is closed");
+    if (currentCancel) throw new Error("an utterance is already in progress on this mic session");
+
+    const recorder = new MediaRecorder(stream, { mimeType: pickRecorderMimeType() });
+    const chunks: BlobPart[] = [];
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) chunks.push(event.data);
+    };
+
+    let settled = false;
+    let rafId = 0;
+    let recorderStarted = false;
+    let resolveResult: (result: UtteranceResult) => void = () => {};
+    let rejectResult: (err: unknown) => void = () => {};
+    const result = new Promise<UtteranceResult>((resolve, reject) => {
+      resolveResult = resolve;
+      rejectResult = reject;
+    });
+
+    let voicedMs = 0;
+    let onsetDone = false;
+    let onsetStartedAt: number | null = null;
+    let silenceStartedAt: number | null = null;
+    let lastFrameAt: number | null = null;
+    const startVoiceMs = opts.deferRecordUntilSpeech ? BARGE_IN_START_VOICE_MS : START_VOICE_MS;
+
+    const finish = (blob: Blob) => resolveResult({ blob, voicedMs });
+
+    const stopLoop = () => {
+      cancelAnimationFrame(rafId);
+      currentCancel = null;
+    };
+
+    const stop = () => {
+      if (settled) return;
+      settled = true;
+      stopLoop();
+      if (recorderStarted && recorder.state !== "inactive") {
+        recorder.onstop = () => finish(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
+        recorder.stop();
+      } else {
+        // Recorder never started (deferred recording, onset never reached) —
+        // resolve with an empty blob of the right type rather than hanging.
+        finish(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
       }
+    };
+
+    const cancel = () => {
+      if (settled) return;
+      settled = true;
+      stopLoop();
+      if (recorderStarted && recorder.state !== "inactive") recorder.stop();
+      rejectResult(new DOMException("recording cancelled", "AbortError"));
+    };
+
+    const tick = () => {
+      const now = performance.now();
+      const elapsed = lastFrameAt === null ? 0 : now - lastFrameAt;
+      lastFrameAt = now;
+
+      const isSpeech = readRms() > opts.rmsThreshold;
+
+      if (!onsetDone) {
+        if (isSpeech) {
+          if (onsetStartedAt === null) onsetStartedAt = now;
+          if (now - onsetStartedAt >= startVoiceMs) {
+            onsetDone = true;
+            opts.onSpeechStart?.();
+            if (opts.deferRecordUntilSpeech && !recorderStarted) {
+              recorderStarted = true;
+              recorder.start();
+            }
+          }
+        } else {
+          onsetStartedAt = null; // dip before sustain completes resets the onset timer
+        }
+      } else if (isSpeech) {
+        voicedMs += elapsed;
+        silenceStartedAt = null;
+      } else {
+        if (silenceStartedAt === null) {
+          silenceStartedAt = now;
+        } else if (now - silenceStartedAt >= opts.silenceDurationSec * 1000) {
+          stop();
+          return;
+        }
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+
+    if (!opts.deferRecordUntilSpeech) {
+      recorderStarted = true;
+      recorder.start();
     }
-    rafId = requestAnimationFrame(watchForSilence);
-  };
+    rafId = requestAnimationFrame(tick);
+    currentCancel = cancel;
 
-  recorder.start();
-  rafId = requestAnimationFrame(watchForSilence);
+    return { result, stop, cancel };
+  }
 
-  return { result, stop, cancel };
+  function close() {
+    if (closed) return;
+    closed = true;
+    currentCancel?.();
+    source.disconnect();
+    analyser.disconnect();
+    stream.getTracks().forEach((track) => track.stop());
+    void audioCtx.close().catch(() => {});
+  }
+
+  return { recordUtterance, close };
 }

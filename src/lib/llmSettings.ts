@@ -27,6 +27,10 @@ export interface ProviderSettings {
   networkProviderEnabled: boolean;
   /** STT end-of-turn silence gap in seconds, used by the voice call feature. App-local by contract (not part of VoiceConfigV1). */
   sttSilenceDuration: number;
+  /** RMS amplitude (0..1) above which mic input counts as speech (VAD threshold used for end-of-turn detection and barge-in). App-local by contract (not part of VoiceConfigV1). */
+  micThreshold: number;
+  /** When true, the voice call listens while TTS plays and stops playback as soon as the user starts talking (barge-in). App-local by contract (not part of VoiceConfigV1). */
+  bargeInEnabled: boolean;
   /**
    * VRM expression switching via a separate LLM request (lib/emotionClassifier.ts).
    * "auto" measures the classification request's latency and turns itself off
@@ -38,8 +42,8 @@ export interface ProviderSettings {
 export const EXPRESSION_MODES = ["auto", "on", "off"] as const;
 export type ExpressionMode = (typeof EXPRESSION_MODES)[number];
 
-/** reasoning_effort の選択肢。空文字はパラメータを送らない選択を表す。 */
-export const REASONING_EFFORT_OPTIONS = ["none", "low", "medium", "high"] as const;
+/** reasoning_effort の選択肢。'none' も「思考なし」を明示送信する実値（送らない、ではない）。 */
+export const REASONING_EFFORT_OPTIONS = ["none", "minimal", "low", "medium", "high"] as const;
 
 /** 既定の reasoning_effort — ユーザー方針でデフォルトは "none"（思考なしで応答を速く）。 */
 export const DEFAULT_REASONING_EFFORT = "none";
@@ -48,6 +52,8 @@ export const DEFAULT_PROVIDER_SETTINGS: ProviderSettings = {
   networkConsumerEnabled: false,
   networkProviderEnabled: false,
   sttSilenceDuration: 0.8,
+  micThreshold: 0.02,
+  bargeInEnabled: true,
   expressionMode: "auto",
 };
 
@@ -65,10 +71,16 @@ export function sanitizeSettings(value: unknown): ProviderSettings {
   const expressionMode = (EXPRESSION_MODES as readonly string[]).includes(value.expressionMode as string)
     ? (value.expressionMode as ExpressionMode)
     : DEFAULT_PROVIDER_SETTINGS.expressionMode;
+  const micThreshold =
+    typeof value.micThreshold === "number" && Number.isFinite(value.micThreshold)
+      ? Math.min(0.5, Math.max(0, value.micThreshold))
+      : DEFAULT_PROVIDER_SETTINGS.micThreshold;
   return {
     networkConsumerEnabled: value.networkConsumerEnabled === true,
     networkProviderEnabled: value.networkProviderEnabled === true,
     sttSilenceDuration,
+    micThreshold,
+    bargeInEnabled: value.bargeInEnabled !== false,
     expressionMode,
   };
 }
@@ -262,6 +274,8 @@ export function migrateLegacyProviderSettingsToShared(): void {
     networkConsumerEnabled: parsed.networkConsumerEnabled === true,
     networkProviderEnabled: parsed.networkProviderEnabled === true,
     sttSilenceDuration: legacyStt?.silenceDuration ?? DEFAULT_PROVIDER_SETTINGS.sttSilenceDuration,
+    micThreshold: DEFAULT_PROVIDER_SETTINGS.micThreshold,
+    bargeInEnabled: DEFAULT_PROVIDER_SETTINGS.bargeInEnabled,
     expressionMode: sanitizeSettings(parsed).expressionMode,
   });
 }
