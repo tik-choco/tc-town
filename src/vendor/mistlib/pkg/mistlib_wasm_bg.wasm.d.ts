@@ -32,11 +32,11 @@ export const storage_add_at: (a: number, b: number, c: number, d: number, e: num
 export const storage_add_pinned: (a: number, b: number, c: number, d: number) => any;
 export const storage_get: (a: number, b: number) => any;
 export const storage_is_pinned: (a: number, b: number) => any;
+export const storage_pin: (a: number, b: number) => any;
+export const storage_unpin: (a: number, b: number) => any;
 export const storage_kv_delete: (a: number, b: number) => any;
 export const storage_kv_get: (a: number, b: number) => any;
 export const storage_kv_set: (a: number, b: number, c: any) => any;
-export const storage_pin: (a: number, b: number) => any;
-export const storage_unpin: (a: number, b: number) => any;
 export const wasm_bindgen__closure__destroy__h19326926141fe941: (a: number, b: number) => void;
 export const wasm_bindgen__closure__destroy__hf1eac46c7b14bbfe: (a: number, b: number) => void;
 export const wasm_bindgen__closure__destroy__hd9b9648ddf6074bf: (a: number, b: number) => void;

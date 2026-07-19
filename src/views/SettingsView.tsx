@@ -1,8 +1,19 @@
-// Settings screen: LLM profile editor, AI Network room/consumer/provider
-// controls, TTS/STT voice endpoints, and app appearance (theme/language).
+// Settings screen: AI接続 (LLM connections/presets), AI Network (room/
+// consumer/provider controls), タスク (per-feature model assignment + TTS/
+// STT/character-expression), and app appearance (theme/language).
 // Self-contained — the integration wave mounts <SettingsView /> behind the
-// shell's "設定" nav. Persistence is immediate: every edit writes through to
-// localStorage via saveProviderSettings so nothing is lost on navigation.
+// shell's "設定" nav. Persistence is immediate: every committed edit writes
+// through to localStorage (via saveProviderSettings / saveLlmConfig) so
+// nothing is lost on navigation.
+//
+// UI shape follows the tik-choco family's shared "AI接続 / AI Network /
+// タスク" settings layout (tc-docs/drafts/llm-settings-common-v1.md,
+// reference implementation: tc-translate's SettingsModal.tsx): a flat
+// card-grid for connections/presets, role cards for the network toggles, and
+// tooltip (`data-tip`) descriptions on タスク row labels instead of
+// permanent hint paragraphs. tc-town keeps its pre-existing 表示/はじめに
+// tabs alongside the three shared tabs — those aren't part of the shared
+// spec but there's no reason to fold them in.
 //
 // Sections are presented as tabs (see SETTINGS_TABS below) — the tab picks
 // which panel renders in JSX only. All stateful hooks (settings, the AI
@@ -10,6 +21,29 @@
 // SettingsView so switching tabs never resets a connection or drops
 // in-flight state. The active tab itself is remembered in localStorage so
 // re-opening Settings returns to where the user left off.
+//
+// Divergences from the tc-translate reference (tc-town has no
+// mist-network:// pseudo-provider / oai tunnel / per-model network sharing —
+// see lib/network.ts's header comment for what @tik-choco/mistai's
+// useNetworkProvider actually gives this app):
+//  - No "Network由来" preset badge, no `isNetworkProviderBaseUrl` guard, no
+//    共有モデルチェックリスト: tc-town's provider role always shares exactly
+//    the resolved default preset (advertisedModels is never passed to
+//    useNetworkProvider), so there is nothing per-model to toggle. The
+//    provider role card shows which preset is shared as read-only text.
+//  - reasoning_effort stays a property of the PRESET itself
+//    (ModelPresetV1.reasoningEffort, used by every caller of
+//    requestChatCompletion — characters, growth, evaluation, plaza, emotion
+//    classifier), not a separate per-task local field. The 既定 task row
+//    edits the *currently selected default preset's* reasoningEffort rather
+//    than an independent setting, since tc-town has exactly one
+//    settings-level LLM task (character-level preset overrides remain in
+//    CharactersView, out of scope here).
+//  - Inline edit rows commit each field on blur/select-change but only close
+//    via outside-click/Escape (not "select also closes the row") — avoids
+//    relying on OptionsPicker's manual-entry mode (which commits per
+//    keystroke, unlike tc-translate's bespoke picker) to decide when a row
+//    should auto-close.
 //
 // There used to be a manual "backup" tab here (export/import a full JSON
 // bundle by hand). It's gone — the same bundle is now auto-published to
@@ -22,16 +56,15 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import {
   Cpu,
-  Mic,
   Network,
   Palette,
   Plus,
   Radio,
   RefreshCw,
   Server,
-  Smile,
+  SlidersHorizontal,
   Sparkles,
-  Trash2,
+  X,
 } from "lucide-preact";
 import { MESSAGES_JA } from "@tik-choco/mistai";
 import { ConsumerStatusIndicator, ProviderStatusPanel } from "@tik-choco/mistai/preact";
@@ -63,6 +96,14 @@ import {
   type SharedLlmConfigV1,
   type VoiceConfigV1,
 } from "../lib/llmConfig";
+import {
+  createPreset,
+  createProvider,
+  deletePreset,
+  deleteProvider,
+  patchPreset,
+  patchProvider,
+} from "../lib/llmConfigEdit";
 import { useModelOptions, type ModelOptionsState } from "../lib/models";
 import { OPENAI_TTS_VOICES, useVoiceOptions } from "../lib/voices";
 import {
@@ -77,6 +118,7 @@ import {
 } from "../lib/network";
 import { requestApiChatCompletionStreaming } from "../lib/llm";
 import "../styles/settings.css";
+import "../styles/settings-llm.css";
 
 export interface OptionsPickerClassNames {
   row: string;
@@ -108,10 +150,10 @@ const DEFAULT_OPTIONS_PICKER_CLASS_NAMES: OptionsPickerClassNames = {
  * whenever the fetch hasn't produced any options yet (idle/loading/error),
  * so the field never renders empty.
  *
- * Exported so both the model fields (LLM profile / TTS / STT) and the TTS
- * voice fields (settings + per-character override) share one implementation
- * — callers own the surrounding label/field markup and CSS classes so this
- * works with tc-town's differently-styled settings and character-editor forms.
+ * Exported so both the model fields (LLM connection/preset cards, TTS/STT)
+ * and the TTS voice field share one implementation — callers own the
+ * surrounding label/field markup and CSS classes so this works with
+ * tc-town's differently-styled settings and character-editor forms.
  */
 export function OptionsPicker(props: {
   value: string;
@@ -199,59 +241,6 @@ export function OptionsPicker(props: {
   );
 }
 
-/** Model field for the LLM profile / TTS / STT model pickers — wraps {@link OptionsPicker} in the settings screen's field label. */
-function ModelField(props: {
-  label: string;
-  value: string;
-  placeholder: string;
-  baseUrl: string;
-  apiKey: string;
-  onChange: (model: string) => void;
-}) {
-  return (
-    <label class="tc-field">
-      <span>{props.label}</span>
-      <OptionsPicker
-        value={props.value}
-        placeholder={props.placeholder}
-        baseUrl={props.baseUrl}
-        apiKey={props.apiKey}
-        onChange={props.onChange}
-        useOptions={useModelOptions}
-        itemLabel="モデル"
-        emptyOption={{ label: "未選択" }}
-      />
-    </label>
-  );
-}
-
-/** TTS voice field — wraps {@link OptionsPicker} with the voice-listing hook and the standard OpenAI voice set as a fallback. */
-function VoiceField(props: {
-  label: string;
-  value: string;
-  placeholder: string;
-  baseUrl: string;
-  apiKey: string;
-  onChange: (voice: string) => void;
-}) {
-  return (
-    <label class="tc-field">
-      <span>{props.label}</span>
-      <OptionsPicker
-        value={props.value}
-        placeholder={props.placeholder}
-        baseUrl={props.baseUrl}
-        apiKey={props.apiKey}
-        onChange={props.onChange}
-        useOptions={useVoiceOptions}
-        itemLabel="音声"
-        emptyOption={{ label: "未選択" }}
-        fallbackOptions={OPENAI_TTS_VOICES}
-      />
-    </label>
-  );
-}
-
 const THEME_OPTIONS: Array<{ value: "light" | "dark" | "system"; label: string }> = [
   { value: "light", label: "ライト" },
   { value: "dark", label: "ダーク" },
@@ -278,18 +267,21 @@ function expressionStatusLabel(status: ExpressionFeatureStatus): string {
 }
 
 // ----- Settings tabs -----------------------------------------------------
-// Sections used to be one long scrolling page; they're now tabs so a user
-// looking for one setting doesn't have to scroll past the other four. Tab
-// selection is remembered across visits (localStorage, parsed defensively —
-// same pattern as appSettings.ts / llmSettings.ts).
+// 表示/はじめに are tc-town-local; connection/network/tasks follow the
+// shared family layout (AI接続 / AI Network / タスク — see file header).
+// Tab selection is remembered across visits (localStorage, parsed
+// defensively — same pattern as appSettings.ts / llmSettings.ts). An old
+// stored id from before this redesign ("llm"/"voice") simply isn't in
+// SETTINGS_TABS any more, so loadSettingsTab's membership check falls back
+// to "appearance" — no migration needed.
 
-type SettingsTabId = "appearance" | "llm" | "network" | "voice" | "onboarding";
+type SettingsTabId = "appearance" | "connection" | "network" | "tasks" | "onboarding";
 
 const SETTINGS_TABS: Array<{ id: SettingsTabId; label: string; icon: typeof Palette }> = [
   { id: "appearance", label: "表示", icon: Palette },
-  { id: "llm", label: "LLM", icon: Cpu },
-  { id: "network", label: "AIネットワーク", icon: Network },
-  { id: "voice", label: "音声", icon: Mic },
+  { id: "connection", label: "AI接続", icon: Cpu },
+  { id: "network", label: "AI Network", icon: Network },
+  { id: "tasks", label: "タスク", icon: SlidersHorizontal },
   { id: "onboarding", label: "はじめに", icon: Sparkles },
 ];
 
@@ -359,27 +351,159 @@ export function SettingsView() {
     saveLlmConfig(next);
   }
 
+  /** Runs a llmConfigEdit.ts mutator (createProvider/patchPreset/deletePreset/...) against a clone of the current config and persists the result. */
+  function mutateCfg(mutator: (config: SharedLlmConfigV1) => void): void {
+    const next = structuredClone(cfg);
+    mutator(next);
+    updateCfg(next);
+  }
+
   // Reflect edits made by another app (or another tab of this app) sharing
   // the same origin — e.g. a provider/preset added from tc-news's settings.
   useEffect(() => subscribeLlmConfig((next) => setCfg(next ?? emptyLlmConfig())), []);
 
-  function addProvider(): void {
-    const provider: LlmProviderV1 = {
-      id: crypto.randomUUID(),
-      label: "新しい接続",
-      baseUrl: "http://localhost:1234/v1",
-      apiKey: "",
+  const defaultPreset = cfg.presets.find((p) => p.id === cfg.defaultPresetId);
+
+  function getProviderLabel(providerId: string): string {
+    const provider = cfg.providers.find((p) => p.id === providerId);
+    if (!provider) return "接続不明";
+    return provider.label || provider.baseUrl;
+  }
+
+  function providerFor(providerId: string): LlmProviderV1 | undefined {
+    return cfg.providers.find((p) => p.id === providerId);
+  }
+
+  /** 既定 / 共有中 badges shown on a preset card. No "Network由来" badge — tc-town has no mist-network:// pseudo-provider (see file header). */
+  function getPresetBadges(preset: ModelPresetV1): string[] {
+    const badges: string[] = [];
+    if (cfg.defaultPresetId === preset.id) badges.push("既定");
+    if (settings.networkProviderEnabled && cfg.defaultPresetId === preset.id) badges.push("共有中");
+    return badges;
+  }
+
+  function updateVoice(kind: "tts" | "stt", patch: Partial<VoiceConfigV1>): void {
+    const current: VoiceConfigV1 = cfg[kind] ?? { model: "" };
+    updateCfg({ ...cfg, [kind]: { ...current, ...patch } });
+  }
+
+  /** Resolves the connection (baseUrl/apiKey) a TTS/STT voice field should fetch voices against: the voice's own provider, or (when omitted) the default preset's provider. */
+  function connectionForVoice(voice: VoiceConfigV1 | undefined): LlmProviderV1 | undefined {
+    if (voice?.providerId) return cfg.providers.find((p) => p.id === voice.providerId);
+    const target = resolvePreset(cfg);
+    return target ? cfg.providers.find((p) => p.id === target.providerId) : undefined;
+  }
+
+  const ttsProvider = connectionForVoice(cfg.tts);
+
+  // --- AI接続 tab: inline edit/add row state --------------------------------
+  // At most one row (provider edit/add, preset edit/add) is open at a time.
+  // Text fields commit on blur (so a half-typed label never briefly appears
+  // in another app's picker mid-keystroke); provider/model selects commit
+  // immediately on change. Rows close only via outside-click or Escape — see
+  // file header for why this differs from tc-translate's "model select also
+  // closes the row".
+  const [editingProviderId, setEditingProviderId] = useState("");
+  const [providerDraft, setProviderDraft] = useState({ label: "", baseUrl: "", apiKey: "" });
+  const [addingProvider, setAddingProvider] = useState(false);
+  const [npLabel, setNpLabel] = useState("");
+  const [npBaseUrl, setNpBaseUrl] = useState("");
+  const [npApiKey, setNpApiKey] = useState("");
+
+  const [editingPresetId, setEditingPresetId] = useState("");
+  const [presetDraft, setPresetDraft] = useState({ label: "", temperature: "0.7" });
+  const [addingPreset, setAddingPreset] = useState(false);
+  const [amLabel, setAmLabel] = useState("");
+  const [amProviderId, setAmProviderId] = useState("");
+  const [amModel, setAmModel] = useState("");
+
+  function closeAllInlineRows(): void {
+    setEditingProviderId("");
+    setAddingProvider(false);
+    setEditingPresetId("");
+    setAddingPreset(false);
+  }
+
+  // If the entity currently being edited disappears (e.g. removed from
+  // another tab/app via the shared config), close its inline row instead of
+  // leaving it editing a value that no longer exists.
+  useEffect(() => {
+    if (editingProviderId && !cfg.providers.some((p) => p.id === editingProviderId)) setEditingProviderId("");
+    if (editingPresetId && !cfg.presets.some((p) => p.id === editingPresetId)) setEditingPresetId("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cfg.providers, cfg.presets]);
+
+  // No explicit "close" button on edit rows — outside click / Escape closes
+  // whichever row is open. See tc-translate's SettingsModal for the same
+  // mousedown-before-click guard (a text-selection drag that ends outside
+  // the row must not be read as "clicked outside").
+  const activeRowRef = useRef<HTMLDivElement | null>(null);
+  const mouseDownInsideRef = useRef(false);
+  useEffect(() => {
+    if (!editingProviderId && !addingProvider && !editingPresetId && !addingPreset) return undefined;
+
+    function handleDocumentMouseDown(event: MouseEvent): void {
+      mouseDownInsideRef.current = Boolean(activeRowRef.current && activeRowRef.current.contains(event.target as Node));
+    }
+    function handleDocumentClick(event: MouseEvent): void {
+      if (activeRowRef.current && activeRowRef.current.contains(event.target as Node)) return;
+      if (mouseDownInsideRef.current) return;
+      closeAllInlineRows();
+    }
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape") closeAllInlineRows();
+    }
+
+    document.addEventListener("mousedown", handleDocumentMouseDown);
+    document.addEventListener("click", handleDocumentClick);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleDocumentMouseDown);
+      document.removeEventListener("click", handleDocumentClick);
+      document.removeEventListener("keydown", handleKeyDown);
     };
-    updateCfg({ ...cfg, providers: [...cfg.providers, provider] });
+  }, [editingProviderId, addingProvider, editingPresetId, addingPreset]);
+
+  function commitOnEnter(event: KeyboardEvent): void {
+    if (event.key === "Enter") (event.currentTarget as HTMLElement).blur();
   }
 
-  function updateProvider(id: string, patch: Partial<LlmProviderV1>): void {
-    updateCfg({ ...cfg, providers: cfg.providers.map((p) => (p.id === id ? { ...p, ...patch } : p)) });
+  // --- 接続先 (provider) handlers -------------------------------------------
+
+  function openEditProvider(provider: LlmProviderV1): void {
+    closeAllInlineRows();
+    setEditingProviderId(provider.id);
+    setProviderDraft({ label: provider.label, baseUrl: provider.baseUrl, apiKey: provider.apiKey });
   }
 
-  function deleteProvider(id: string): void {
-    const usedByPresets = cfg.presets.filter((p) => p.providerId === id).length;
-    const usedByVoice = (cfg.tts?.providerId === id ? 1 : 0) + (cfg.stt?.providerId === id ? 1 : 0);
+  function commitProviderField(provider: LlmProviderV1, field: "label" | "baseUrl" | "apiKey"): void {
+    const value = providerDraft[field];
+    if (field === "baseUrl" && !value.trim()) return; // baseUrl is required — don't commit a blank one
+    if (value === provider[field]) return;
+    mutateCfg((config) => patchProvider(config, provider.id, { [field]: value }));
+  }
+
+  function openAddProvider(): void {
+    closeAllInlineRows();
+    setAddingProvider(true);
+    setNpLabel("");
+    setNpBaseUrl("");
+    setNpApiKey("");
+  }
+
+  function commitAddProvider(): void {
+    const baseUrl = npBaseUrl.trim().replace(/\/+$/, "");
+    if (!baseUrl) return;
+    mutateCfg((config) => {
+      const id = createProvider(config, npLabel.trim() || baseUrl);
+      patchProvider(config, id, { baseUrl, apiKey: npApiKey });
+    });
+    setAddingProvider(false);
+  }
+
+  function removeProviderRow(provider: LlmProviderV1): void {
+    const usedByPresets = cfg.presets.filter((p) => p.providerId === provider.id).length;
+    const usedByVoice = (cfg.tts?.providerId === provider.id ? 1 : 0) + (cfg.stt?.providerId === provider.id ? 1 : 0);
     if (usedByPresets > 0 || usedByVoice > 0) {
       const parts = [
         usedByPresets > 0 ? `プリセット ${usedByPresets} 件` : "",
@@ -388,49 +512,71 @@ export function SettingsView() {
       const ok = window.confirm(`この接続は ${parts.join("・")} で使われています。削除すると動作しなくなります。削除しますか？`);
       if (!ok) return;
     }
-    updateCfg({ ...cfg, providers: cfg.providers.filter((p) => p.id !== id) });
+    mutateCfg((config) => deleteProvider(config, provider.id));
+    if (editingProviderId === provider.id) setEditingProviderId("");
   }
 
-  function addPreset(): void {
-    const providerId = cfg.providers[0]?.id;
-    if (!providerId) return; // "追加" is disabled with zero providers
-    const preset: ModelPresetV1 = {
-      id: crypto.randomUUID(),
-      label: "新しいプリセット",
-      providerId,
-      model: "",
-      temperature: 0.7,
-      reasoningEffort: DEFAULT_REASONING_EFFORT,
-    };
-    const presets = [...cfg.presets, preset];
-    const defaultPresetId = cfg.defaultPresetId || preset.id;
-    updateCfg({ ...cfg, presets, defaultPresetId });
+  // --- モデル (preset) handlers ----------------------------------------------
+
+  function openEditPreset(preset: ModelPresetV1): void {
+    closeAllInlineRows();
+    setEditingPresetId(preset.id);
+    setPresetDraft({ label: preset.label, temperature: String(preset.temperature ?? 0.7) });
   }
 
-  function updatePreset(id: string, patch: Partial<ModelPresetV1>): void {
-    updateCfg({ ...cfg, presets: cfg.presets.map((p) => (p.id === id ? { ...p, ...patch } : p)) });
+  function commitPresetLabel(preset: ModelPresetV1): void {
+    const label = presetDraft.label.trim() || preset.model || preset.id;
+    if (label === preset.label) return;
+    mutateCfg((config) => patchPreset(config, preset.id, { label }));
   }
 
-  function deletePreset(id: string): void {
-    const presets = cfg.presets.filter((p) => p.id !== id);
-    const defaultPresetId = cfg.defaultPresetId === id ? (presets[0]?.id ?? "") : cfg.defaultPresetId;
-    updateCfg({ ...cfg, presets, defaultPresetId });
+  function changePresetProvider(preset: ModelPresetV1, providerId: string): void {
+    // The stored model name is meaningless against a different provider's
+    // catalog, so it's cleared here — same as the pre-redesign behavior.
+    mutateCfg((config) => patchPreset(config, preset.id, { providerId, model: "" }));
   }
 
-  function updateVoice(kind: "tts" | "stt", patch: Partial<VoiceConfigV1>): void {
-    const current: VoiceConfigV1 = cfg[kind] ?? { model: "" };
-    updateCfg({ ...cfg, [kind]: { ...current, ...patch } });
+  function changePresetModel(preset: ModelPresetV1, model: string): void {
+    if (model === preset.model) return;
+    mutateCfg((config) => patchPreset(config, preset.id, { model }));
   }
 
-  /** Resolves the connection (baseUrl/apiKey) a TTS/STT field should fetch models/voices against: the voice's own provider, or (when omitted, i.e. "LLMと同じ") the default preset's provider. */
-  function connectionForVoice(voice: VoiceConfigV1 | undefined): LlmProviderV1 | undefined {
-    if (voice?.providerId) return cfg.providers.find((p) => p.id === voice.providerId);
-    const target = resolvePreset(cfg);
-    return target ? cfg.providers.find((p) => p.id === target.providerId) : undefined;
+  function commitPresetTemperature(preset: ModelPresetV1): void {
+    const parsed = Number.parseFloat(presetDraft.temperature);
+    const next = Number.isFinite(parsed) ? parsed : 0.7;
+    if (next === (preset.temperature ?? 0.7)) return;
+    mutateCfg((config) => patchPreset(config, preset.id, { temperature: next }));
   }
 
-  const ttsProvider = connectionForVoice(cfg.tts);
-  const sttProvider = connectionForVoice(cfg.stt);
+  /** Edits the reasoning_effort of a preset directly — used by the タスク tab's 既定 row (see file header for why reasoning_effort stays preset-intrinsic rather than a separate per-task field). */
+  function commitPresetReasoningEffort(preset: ModelPresetV1, reasoningEffort: string): void {
+    mutateCfg((config) => patchPreset(config, preset.id, { reasoningEffort }));
+  }
+
+  function openAddPreset(): void {
+    closeAllInlineRows();
+    setAddingPreset(true);
+    setAmLabel("");
+    setAmProviderId(cfg.providers[0]?.id ?? "");
+    setAmModel("");
+  }
+
+  function commitAddPreset(): void {
+    const model = amModel.trim();
+    if (!amProviderId || !model) return;
+    mutateCfg((config) => {
+      const id = createPreset(config, amProviderId, amLabel.trim() || model);
+      patchPreset(config, id, { model });
+    });
+    setAddingPreset(false);
+  }
+
+  function removePresetRow(preset: ModelPresetV1): void {
+    const ok = window.confirm(`プリセット「${preset.label || preset.model}」を削除しますか？`);
+    if (!ok) return;
+    mutateCfg((config) => deletePreset(config, preset.id));
+    if (editingPresetId === preset.id) setEditingPresetId("");
+  }
 
   // ----- Consumer connection lifecycle -------------------------------------
   const [consumer, setConsumer] = useState<ConsumerStatus>(() => consumerStatus());
@@ -470,6 +616,321 @@ export function SettingsView() {
       return requestApiChatCompletionStreaming(target, messages, model, onDelta);
     },
   });
+
+  // ----- AI Network tab: Room ID draft (blur/Enter commits) -----------------
+  const [roomIdDraft, setRoomIdDraft] = useState(cfg.network.roomId);
+  useEffect(() => setRoomIdDraft(cfg.network.roomId), [cfg.network.roomId]);
+  function commitRoomId(): void {
+    if (roomIdDraft === cfg.network.roomId) return;
+    updateCfg({ ...cfg, network: { roomId: roomIdDraft } });
+  }
+
+  // --- 接続先 (provider) card rendering --------------------------------------
+
+  function renderProviderRow(prov: LlmProviderV1) {
+    if (editingProviderId === prov.id) {
+      return (
+        <div class="model-row model-row-editing" key={prov.id} ref={activeRowRef}>
+          <div class="model-row-edit-fields">
+            <input
+              value={providerDraft.label}
+              placeholder="接続名"
+              autoComplete="off"
+              onInput={(e) => setProviderDraft((d) => ({ ...d, label: e.currentTarget.value }))}
+              onBlur={() => commitProviderField(prov, "label")}
+              onKeyDown={commitOnEnter}
+            />
+            <input
+              value={providerDraft.baseUrl}
+              title={prov.baseUrl}
+              placeholder="http://localhost:1234/v1"
+              autoComplete="off"
+              onInput={(e) => setProviderDraft((d) => ({ ...d, baseUrl: e.currentTarget.value }))}
+              onBlur={() => commitProviderField(prov, "baseUrl")}
+              onKeyDown={commitOnEnter}
+            />
+            <input
+              type="password"
+              value={providerDraft.apiKey}
+              placeholder="sk-..."
+              autoComplete="off"
+              onInput={(e) => setProviderDraft((d) => ({ ...d, apiKey: e.currentTarget.value }))}
+              onBlur={() => commitProviderField(prov, "apiKey")}
+              onKeyDown={commitOnEnter}
+            />
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div class="model-row" key={prov.id}>
+        <button type="button" class="model-row-main" onClick={() => openEditProvider(prov)}>
+          <span class="model-row-label">{prov.label || prov.baseUrl}</span>
+          <span class="model-row-model">{prov.baseUrl}</span>
+        </button>
+        <span
+          class="preset-chip-remove model-row-remove"
+          role="button"
+          tabIndex={0}
+          title="接続を削除"
+          onClick={(e) => {
+            e.stopPropagation();
+            removeProviderRow(prov);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              e.stopPropagation();
+              removeProviderRow(prov);
+            }
+          }}
+        >
+          <X size={13} />
+        </span>
+      </div>
+    );
+  }
+
+  function renderAddProviderTile() {
+    if (addingProvider) {
+      return (
+        <div class="model-row model-row-editing" ref={activeRowRef}>
+          <div class="model-row-edit-fields">
+            <input value={npLabel} onInput={(e) => setNpLabel(e.currentTarget.value)} placeholder="接続名" autoComplete="off" />
+            <input
+              value={npBaseUrl}
+              onInput={(e) => setNpBaseUrl(e.currentTarget.value)}
+              placeholder="http://localhost:1234/v1"
+              autoComplete="off"
+            />
+            <input
+              type="password"
+              value={npApiKey}
+              onInput={(e) => setNpApiKey(e.currentTarget.value)}
+              placeholder="sk-..."
+              autoComplete="off"
+            />
+          </div>
+          <div class="model-row-add-actions">
+            <button
+              type="button"
+              class="connection-form-btn connection-form-btn-primary"
+              onClick={commitAddProvider}
+              disabled={!npBaseUrl.trim()}
+            >
+              <Plus size={13} />
+              追加
+            </button>
+            <button type="button" class="connection-form-btn" onClick={() => setAddingProvider(false)}>
+              キャンセル
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <button type="button" class="grid-add-tile" onClick={openAddProvider}>
+        <Plus size={16} />
+        <span>接続を追加</span>
+      </button>
+    );
+  }
+
+  // --- モデル (preset) card rendering -----------------------------------------
+
+  function renderPresetRow(preset: ModelPresetV1) {
+    if (editingPresetId === preset.id) {
+      const provider = providerFor(preset.providerId);
+      return (
+        <div class="model-row model-row-editing" key={preset.id} ref={activeRowRef}>
+          <div class="model-row-edit-fields">
+            <input
+              value={presetDraft.label}
+              placeholder="プリセット名"
+              autoComplete="off"
+              onInput={(e) => setPresetDraft((d) => ({ ...d, label: e.currentTarget.value }))}
+              onBlur={() => commitPresetLabel(preset)}
+              onKeyDown={commitOnEnter}
+            />
+            <select value={preset.providerId} onChange={(e) => changePresetProvider(preset, e.currentTarget.value)}>
+              {cfg.providers.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label || p.baseUrl}
+                </option>
+              ))}
+              {!cfg.providers.some((p) => p.id === preset.providerId) && (
+                <option value={preset.providerId}>{preset.providerId}（不明）</option>
+              )}
+            </select>
+            <OptionsPicker
+              value={preset.model}
+              placeholder="gpt-4o-mini"
+              baseUrl={provider?.baseUrl ?? ""}
+              apiKey={provider?.apiKey ?? ""}
+              onChange={(model) => changePresetModel(preset, model)}
+              useOptions={useModelOptions}
+              itemLabel="モデル"
+            />
+            <input
+              type="number"
+              min={0}
+              max={2}
+              step={0.1}
+              value={presetDraft.temperature}
+              aria-label="temperature"
+              title="temperature"
+              onInput={(e) => setPresetDraft((d) => ({ ...d, temperature: e.currentTarget.value }))}
+              onBlur={() => commitPresetTemperature(preset)}
+              onKeyDown={commitOnEnter}
+            />
+          </div>
+        </div>
+      );
+    }
+
+    const badges = getPresetBadges(preset);
+    return (
+      <div class="model-row" key={preset.id}>
+        <button type="button" class="model-row-main" onClick={() => openEditPreset(preset)}>
+          <span class="model-row-label">{preset.label}</span>
+          <span class="model-row-model">{preset.model || "(モデル未設定)"}</span>
+          <span class="model-row-provider">{getProviderLabel(preset.providerId)}</span>
+        </button>
+        {badges.length > 0 ? (
+          <span class="model-row-badges">
+            {badges.map((badge) => (
+              <span key={badge} class="task-badge">
+                {badge}
+              </span>
+            ))}
+          </span>
+        ) : null}
+        <span
+          class="preset-chip-remove model-row-remove"
+          role="button"
+          tabIndex={0}
+          title="プリセットを削除"
+          onClick={(e) => {
+            e.stopPropagation();
+            removePresetRow(preset);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              e.stopPropagation();
+              removePresetRow(preset);
+            }
+          }}
+        >
+          <X size={13} />
+        </span>
+      </div>
+    );
+  }
+
+  function renderAddPresetTile() {
+    if (cfg.providers.length === 0) {
+      return (
+        <button type="button" class="grid-add-tile" disabled title="先に接続を追加してください">
+          <Plus size={16} />
+          <span>モデルを追加</span>
+        </button>
+      );
+    }
+    if (addingPreset) {
+      const provider = providerFor(amProviderId);
+      return (
+        <div class="model-row model-row-editing" ref={activeRowRef}>
+          <div class="model-row-edit-fields">
+            <input value={amLabel} onInput={(e) => setAmLabel(e.currentTarget.value)} placeholder="プリセット名" autoComplete="off" />
+            <select value={amProviderId} onChange={(e) => setAmProviderId(e.currentTarget.value)}>
+              {cfg.providers.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label || p.baseUrl}
+                </option>
+              ))}
+            </select>
+            <OptionsPicker
+              value={amModel}
+              placeholder="gpt-4o-mini"
+              baseUrl={provider?.baseUrl ?? ""}
+              apiKey={provider?.apiKey ?? ""}
+              onChange={setAmModel}
+              useOptions={useModelOptions}
+              itemLabel="モデル"
+            />
+          </div>
+          <div class="model-row-add-actions">
+            <button
+              type="button"
+              class="connection-form-btn connection-form-btn-primary"
+              onClick={commitAddPreset}
+              disabled={!amProviderId || !amModel.trim()}
+            >
+              <Plus size={13} />
+              追加
+            </button>
+            <button type="button" class="connection-form-btn" onClick={() => setAddingPreset(false)}>
+              キャンセル
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <button type="button" class="grid-add-tile" onClick={openAddPreset}>
+        <Plus size={16} />
+        <span>モデルを追加</span>
+      </button>
+    );
+  }
+
+  // --- タスク tab: TTS/STT model picker --------------------------------------
+  // Options: "ブラウザ標準（未設定）" (clears providerId/model), a preset card
+  // (sets providerId+model to that preset's pair), or — only when the stored
+  // pair doesn't match any current preset — a read-only "current value"
+  // option so a value written by another app/session stays visible instead
+  // of silently rendering as unset. No "AI Networkにおまかせ" option: tc-town
+  // has no mist-network:// pseudo-provider (see file header).
+  function matchedVoicePreset(voice: VoiceConfigV1 | undefined): ModelPresetV1 | undefined {
+    if (!voice) return undefined;
+    return cfg.presets.find((p) => p.providerId === voice.providerId && p.model === voice.model);
+  }
+
+  function renderVoicePicker(kind: "tts" | "stt") {
+    const voice = cfg[kind];
+    const matched = matchedVoicePreset(voice);
+    const hasUnmatchedCurrent = Boolean(voice?.model.trim()) && !matched;
+    const value = matched ? matched.id : hasUnmatchedCurrent ? "__current__" : "";
+
+    function handleChange(next: string): void {
+      if (next === "__current__") return;
+      if (next === "") {
+        updateVoice(kind, { providerId: undefined, model: "" });
+        return;
+      }
+      const preset = cfg.presets.find((p) => p.id === next);
+      if (!preset) return;
+      updateVoice(kind, { providerId: preset.providerId, model: preset.model });
+    }
+
+    return (
+      <select
+        value={value}
+        onChange={(e) => handleChange(e.currentTarget.value)}
+        aria-label={kind === "tts" ? "読み上げモデル" : "書き起こしモデル"}
+      >
+        <option value="">ブラウザ標準（未設定）</option>
+        {hasUnmatchedCurrent ? <option value="__current__">{voice!.model}</option> : null}
+        {cfg.presets.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.label || p.model || p.id}
+          </option>
+        ))}
+      </select>
+    );
+  }
 
   return (
     <div class="tc-settings">
@@ -531,206 +992,43 @@ export function SettingsView() {
           </section>
         ) : null}
 
-        {/* --- LLM providers / presets ----------------------------------------- */}
-        {activeTab === "llm" ? (
+        {/* --- AI接続 (LLM connections/presets) -------------------------------- */}
+        {activeTab === "connection" ? (
           <section
             class="tc-settings-section"
             role="tabpanel"
-            id="tc-settings-panel-llm"
-            aria-labelledby="tc-settings-tab-llm"
+            id="tc-settings-panel-connection"
+            aria-labelledby="tc-settings-tab-connection"
           >
-          <div class="tc-settings-heading-row">
-            <h2 class="tc-settings-heading">接続</h2>
-            <button type="button" class="tc-btn" onClick={addProvider}>
-              <Plus size={16} />
-              追加
-            </button>
-          </div>
-          <p class="tc-hint">
-            LLMの接続先（ベースURL・APIキー）です。同一ブラウザで動く tik-choco ファミリーの他のアプリとも共有されます。
-          </p>
-
-          <div class="tc-profile-list">
-            {cfg.providers.map((prov) => (
-              <div key={prov.id} class="tc-profile-card">
-                <div class="tc-profile-head">
-                  <input
-                    class="tc-profile-label"
-                    value={prov.label}
-                    placeholder="接続名"
-                    onInput={(e) => updateProvider(prov.id, { label: e.currentTarget.value })}
-                  />
-                  <button
-                    type="button"
-                    class="tc-icon-btn danger"
-                    onClick={() => deleteProvider(prov.id)}
-                    title="削除"
-                    aria-label="接続を削除"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-                <label class="tc-field">
-                  <span>Base URL</span>
-                  <input
-                    value={prov.baseUrl}
-                    placeholder="http://localhost:1234/v1"
-                    onInput={(e) => updateProvider(prov.id, { baseUrl: e.currentTarget.value })}
-                  />
-                </label>
-                <label class="tc-field">
-                  <span>API キー</span>
-                  <input
-                    type="password"
-                    value={prov.apiKey}
-                    placeholder="sk-..."
-                    autocomplete="off"
-                    onInput={(e) => updateProvider(prov.id, { apiKey: e.currentTarget.value })}
-                  />
-                </label>
+            <div class="server-list-header">
+              <label>接続先</label>
+            </div>
+            <div class="settings-flat-section settings-flat-section-connection">
+              {cfg.providers.length === 0 && !addingProvider ? (
+                <p class="tc-hint">まだ接続がありません。「接続を追加」から作成してください。</p>
+              ) : null}
+              <div class="model-row-list">
+                {cfg.providers.map((prov) => renderProviderRow(prov))}
+                {renderAddProviderTile()}
               </div>
-            ))}
-            {cfg.providers.length === 0 && <p class="tc-hint">まだ接続がありません。「追加」から作成してください。</p>}
-          </div>
+            </div>
 
-          <div class="tc-settings-heading-row">
-            <h2 class="tc-settings-heading">プリセット</h2>
-            <button type="button" class="tc-btn" onClick={addPreset} disabled={cfg.providers.length === 0}>
-              <Plus size={16} />
-              追加
-            </button>
-          </div>
-          <p class="tc-hint">キャラクターとの会話に使うモデルの組み合わせです。上の接続とモデル名を選んで作成します。</p>
-
-          <label class="tc-field">
-            <span>既定のプリセット</span>
-            <select
-              value={cfg.defaultPresetId}
-              onChange={(e) => updateCfg({ ...cfg, defaultPresetId: e.currentTarget.value })}
-            >
-              <option value="">未選択</option>
-              {cfg.presets.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label || p.id}
-                </option>
-              ))}
-            </select>
-          </label>
-          <p class="tc-hint">既定のプリセットは新しいキャラクターとネットワーク共有で使用されます。</p>
-
-          <div class="tc-profile-list">
-            {cfg.presets.map((preset) => {
-              const provider = cfg.providers.find((p) => p.id === preset.providerId);
-              return (
-                <div key={preset.id} class="tc-profile-card">
-                  <div class="tc-profile-head">
-                    <input
-                      class="tc-profile-label"
-                      value={preset.label}
-                      placeholder="プリセット名"
-                      onInput={(e) => updatePreset(preset.id, { label: e.currentTarget.value })}
-                    />
-                    {preset.id === cfg.defaultPresetId ? <span class="tc-badge">既定</span> : null}
-                    <button
-                      type="button"
-                      class="tc-icon-btn danger"
-                      onClick={() => deletePreset(preset.id)}
-                      title="削除"
-                      aria-label="プリセットを削除"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                  <label class="tc-field">
-                    <span>接続</span>
-                    <select
-                      value={preset.providerId}
-                      onChange={(e) => updatePreset(preset.id, { providerId: e.currentTarget.value })}
-                    >
-                      {cfg.providers.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.label || p.baseUrl}
-                        </option>
-                      ))}
-                      {!cfg.providers.some((p) => p.id === preset.providerId) && (
-                        <option value={preset.providerId}>{preset.providerId}（不明）</option>
-                      )}
-                    </select>
-                  </label>
-                  <ModelField
-                    label="モデル"
-                    value={preset.model}
-                    placeholder="gpt-4o-mini"
-                    baseUrl={provider?.baseUrl ?? ""}
-                    apiKey={provider?.apiKey ?? ""}
-                    onChange={(model) => updatePreset(preset.id, { model })}
-                  />
-                  <label class="tc-field">
-                    <span>Temperature</span>
-                    <input
-                      type="number"
-                      min={0}
-                      max={2}
-                      step={0.1}
-                      value={preset.temperature ?? 0.7}
-                      onInput={(e) => {
-                        const parsed = Number.parseFloat(e.currentTarget.value);
-                        updatePreset(preset.id, { temperature: Number.isFinite(parsed) ? parsed : 0.7 });
-                      }}
-                    />
-                  </label>
-                  <label class="tc-field">
-                    <span>推論エフォート（reasoning_effort）</span>
-                    <select
-                      value={preset.reasoningEffort ?? DEFAULT_REASONING_EFFORT}
-                      onChange={(e) => updatePreset(preset.id, { reasoningEffort: e.currentTarget.value })}
-                    >
-                      <option value="">送信しない</option>
-                      {REASONING_EFFORT_OPTIONS.map((effort) => (
-                        <option key={effort} value={effort}>
-                          {effort === DEFAULT_REASONING_EFFORT ? `${effort}（既定）` : effort}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-              );
-            })}
-            {cfg.presets.length === 0 && <p class="tc-hint">まだプリセットがありません。先に接続を追加してください。</p>}
-          </div>
-
-          <div class="tc-settings-heading-row">
-            <Smile size={18} />
-            <h2 class="tc-settings-heading">表情の自動切り替え</h2>
-          </div>
-          <p class="tc-hint">
-            応答ごとに小さなLLMリクエストで感情を判定し、キャラクターの表情を切り替えます。「自動」を選ぶと、応答が遅い場合は自動でオフになります。
-          </p>
-          <div class="tc-expr-modes" role="radiogroup" aria-label="表情の自動切り替え">
-            {EXPRESSION_MODES.map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                role="radio"
-                aria-checked={settings.expressionMode === mode}
-                class={`tc-expr-mode-btn${settings.expressionMode === mode ? " tc-expr-mode-btn--active" : ""}`}
-                onClick={() => updateExpressionMode(mode)}
-              >
-                {EXPRESSION_MODE_LABELS[mode]}
-              </button>
-            ))}
-          </div>
-          <p class="tc-expr-status">
-            状態: {expressionStatusLabel(expressionStatus)}
-            {" / "}
-            {expressionStatus.sampleCount > 0
-              ? `平均応答時間 ${expressionStatus.avgLatencyMs}ms（${expressionStatus.sampleCount}件）`
-              : "まだ計測なし"}
-          </p>
+            <div class="server-list-header">
+              <label>モデル</label>
+            </div>
+            <div class="settings-flat-section settings-flat-section-models">
+              {cfg.providers.length > 0 && cfg.presets.length === 0 && !addingPreset ? (
+                <p class="tc-hint">まだモデルがありません。「モデルを追加」から作成してください。</p>
+              ) : null}
+              <div class="model-row-list">
+                {cfg.presets.map((preset) => renderPresetRow(preset))}
+                {renderAddPresetTile()}
+              </div>
+            </div>
           </section>
         ) : null}
 
-        {/* --- AI Network ---------------------------------------------------- */}
+        {/* --- AI Network ------------------------------------------------------ */}
         {activeTab === "network" ? (
           <section
             class="tc-settings-section"
@@ -738,177 +1036,249 @@ export function SettingsView() {
             id="tc-settings-panel-network"
             aria-labelledby="tc-settings-tab-network"
           >
-          <h2 class="tc-settings-heading">AI ネットワーク</h2>
-          <p class="tc-hint">
-            ルームを共有すると、他の端末の LLM を利用したり、自分の LLM を提供したりできます。
-          </p>
-
-          <label class="tc-field">
-            <span>ルーム ID</span>
-            <input
-              value={cfg.network.roomId}
-              placeholder="例: my-town-room"
-              onInput={(e) => updateCfg({ ...cfg, network: { roomId: e.currentTarget.value } })}
-            />
-          </label>
-
-          <div class="tc-role-card">
-            <label class="tc-role-head">
+            <label class="tc-field">
+              <span>ルーム ID</span>
               <input
-                type="checkbox"
-                checked={settings.networkConsumerEnabled}
-                onChange={(e) => update({ ...settings, networkConsumerEnabled: e.currentTarget.checked })}
+                value={roomIdDraft}
+                placeholder="例: my-town-room"
+                onInput={(e) => setRoomIdDraft(e.currentTarget.value)}
+                onBlur={commitRoomId}
+                onKeyDown={commitOnEnter}
               />
-              <Radio size={16} />
-              <span class="tc-role-title">共有された LLM を利用する（コンシューマー）</span>
             </label>
-            {settings.networkConsumerEnabled ? (
-              <div class="tc-role-body">
-                <ConsumerStatusIndicator
-                  status={consumer}
-                  updatedAt={consumerUpdatedAt}
-                  variant="detailed"
-                  messages={MESSAGES_JA}
-                  note="ルーム ID を入力するとプロバイダーを探します。"
-                />
-              </div>
-            ) : null}
-          </div>
 
-          <div class="tc-role-card">
-            <label class="tc-role-head">
-              <input
-                type="checkbox"
-                checked={settings.networkProviderEnabled}
-                onChange={(e) => update({ ...settings, networkProviderEnabled: e.currentTarget.checked })}
-              />
-              <Server size={16} />
-              <span class="tc-role-title">自分の LLM を提供する（プロバイダー）</span>
-            </label>
-            {settings.networkProviderEnabled ? (
-              <div class="tc-role-body">
-                <ProviderStatusPanel
-                  status={provider.status}
-                  statusUpdatedAt={provider.statusUpdatedAt}
-                  errorMessage={provider.errorMessage}
-                  ownNodeId={provider.ownNodeId}
-                  peers={provider.peers}
-                  consumerCount={provider.consumerCount}
-                  logs={provider.logs}
-                  messages={MESSAGES_JA}
-                  notice={
-                    !upstreamConfigured ? (
-                      <p class="mistai-status-detail error">
-                        既定プリセットの接続先とモデルを設定すると提供を開始できます。
-                      </p>
-                    ) : null
-                  }
+            <div class="tc-role-card">
+              <label class="tc-role-head">
+                <input
+                  type="checkbox"
+                  checked={settings.networkConsumerEnabled}
+                  onChange={(e) => update({ ...settings, networkConsumerEnabled: e.currentTarget.checked })}
                 />
-              </div>
-            ) : null}
-          </div>
+                <Radio size={16} />
+                <span class="tc-role-title" data-tip="ルームに参加している他の端末の LLM を利用します。">
+                  ネットワークの LLM を使う
+                </span>
+              </label>
+              {settings.networkConsumerEnabled ? (
+                <div class="tc-role-body">
+                  <ConsumerStatusIndicator
+                    status={consumer}
+                    updatedAt={consumerUpdatedAt}
+                    variant="detailed"
+                    messages={MESSAGES_JA}
+                    note="ルーム ID を入力するとプロバイダーを探します。"
+                  />
+                </div>
+              ) : null}
+            </div>
+
+            <div class="tc-role-card">
+              <label class="tc-role-head">
+                <input
+                  type="checkbox"
+                  checked={settings.networkProviderEnabled}
+                  onChange={(e) => update({ ...settings, networkProviderEnabled: e.currentTarget.checked })}
+                />
+                <Server size={16} />
+                <span class="tc-role-title" data-tip="自分の既定プリセットの LLM をルームの他の端末に提供します。">
+                  AI を提供する
+                </span>
+              </label>
+              {settings.networkProviderEnabled ? (
+                <div class="tc-role-body">
+                  {upstreamConfigured && providerTarget ? (
+                    <p class="tc-hint">共有中のモデル: {providerTarget.label || providerTarget.model}</p>
+                  ) : null}
+                  <ProviderStatusPanel
+                    status={provider.status}
+                    statusUpdatedAt={provider.statusUpdatedAt}
+                    errorMessage={provider.errorMessage}
+                    ownNodeId={provider.ownNodeId}
+                    peers={provider.peers}
+                    consumerCount={provider.consumerCount}
+                    logs={provider.logs}
+                    messages={MESSAGES_JA}
+                    notice={
+                      !upstreamConfigured ? (
+                        <p class="mistai-status-detail error">
+                          「AI接続」タブで既定プリセットの接続先とモデルを設定すると提供を開始できます。
+                        </p>
+                      ) : null
+                    }
+                  />
+                </div>
+              ) : null}
+            </div>
           </section>
         ) : null}
 
-        {/* --- Voice (TTS / STT) --------------------------------------------- */}
-        {activeTab === "voice" ? (
+        {/* --- タスク (per-feature model assignment) ----------------------------- */}
+        {activeTab === "tasks" ? (
           <section
             class="tc-settings-section"
             role="tabpanel"
-            id="tc-settings-panel-voice"
-            aria-labelledby="tc-settings-tab-voice"
+            id="tc-settings-panel-tasks"
+            aria-labelledby="tc-settings-tab-tasks"
           >
-          <div class="tc-settings-heading-row">
-            <Mic size={18} />
-            <h2 class="tc-settings-heading">音声（読み上げ・書き起こし）</h2>
-          </div>
-          <p class="tc-hint">
-            キャラクターの声の読み上げ（TTS）と、音声入力の書き起こし（STT）の接続先を設定します。「LLMと同じ」を選ぶと既定のLLM接続を流用します。
-          </p>
+            <div class="task-model-item">
+              <span data-tip="キャラクターとの会話・評価・成長診断など、アプリ全体で使う既定のモデルです。">既定</span>
+              <div class="task-model-fields">
+                <div class="task-model-field">
+                  <select
+                    value={cfg.defaultPresetId}
+                    onChange={(e) => updateCfg({ ...cfg, defaultPresetId: e.currentTarget.value })}
+                    aria-label="既定のプリセット"
+                  >
+                    <option value="">未選択</option>
+                    {cfg.presets.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.label || p.id}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div class="task-model-field">
+                  <select
+                    value={defaultPreset?.reasoningEffort ?? DEFAULT_REASONING_EFFORT}
+                    disabled={!defaultPreset}
+                    onChange={(e) => defaultPreset && commitPresetReasoningEffort(defaultPreset, e.currentTarget.value)}
+                    aria-label="推論エフォート"
+                    title="推論エフォート（reasoning_effort）"
+                  >
+                    {REASONING_EFFORT_OPTIONS.map((effort) => (
+                      <option key={effort} value={effort}>
+                        {effort}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
 
-          <h3 class="tc-subheading">読み上げ（TTS）</h3>
-          <label class="tc-field">
-            <span>接続</span>
-            <select
-              value={cfg.tts?.providerId ?? ""}
-              onChange={(e) => updateVoice("tts", { providerId: e.currentTarget.value || undefined })}
-            >
-              <option value="">LLMと同じ</option>
-              {cfg.providers.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label || p.baseUrl}
-                </option>
-              ))}
-            </select>
-          </label>
-          <ModelField
-            label="モデル"
-            value={cfg.tts?.model ?? ""}
-            placeholder="tts-1"
-            baseUrl={ttsProvider?.baseUrl ?? ""}
-            apiKey={ttsProvider?.apiKey ?? ""}
-            onChange={(model) => updateVoice("tts", { model })}
-          />
-          <VoiceField
-            label="ボイス"
-            value={cfg.tts?.voice ?? ""}
-            placeholder="alloy"
-            baseUrl={ttsProvider?.baseUrl ?? ""}
-            apiKey={ttsProvider?.apiKey ?? ""}
-            onChange={(voice) => updateVoice("tts", { voice: voice || undefined })}
-          />
-          <label class="tc-field">
-            <span>速度</span>
-            <input
-              type="number"
-              min={0.25}
-              max={4}
-              step={0.05}
-              value={cfg.tts?.speed ?? 1}
-              onInput={(e) => {
-                const parsed = Number.parseFloat(e.currentTarget.value);
-                updateVoice("tts", { speed: Number.isFinite(parsed) ? parsed : 1 });
-              }}
-            />
-          </label>
+            <div class="task-model-item">
+              <span data-tip="応答ごとに小さな LLM リクエストで感情を判定し、キャラクターの表情を切り替えます。「自動」は応答が遅い場合に自動でオフになります。">
+                表情
+              </span>
+              <div class="task-model-fields">
+                <div class="tc-expr-modes" role="radiogroup" aria-label="表情の自動切り替え">
+                  {EXPRESSION_MODES.map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      role="radio"
+                      aria-checked={settings.expressionMode === mode}
+                      class={`tc-expr-mode-btn${settings.expressionMode === mode ? " tc-expr-mode-btn--active" : ""}`}
+                      onClick={() => updateExpressionMode(mode)}
+                    >
+                      {EXPRESSION_MODE_LABELS[mode]}
+                    </button>
+                  ))}
+                </div>
+                <p class="tc-expr-status">
+                  状態: {expressionStatusLabel(expressionStatus)}
+                  {" / "}
+                  {expressionStatus.sampleCount > 0
+                    ? `平均応答時間 ${expressionStatus.avgLatencyMs}ms（${expressionStatus.sampleCount}件）`
+                    : "まだ計測なし"}
+                </p>
+              </div>
+            </div>
 
-          <h3 class="tc-subheading">書き起こし（STT）</h3>
-          <label class="tc-field">
-            <span>接続</span>
-            <select
-              value={cfg.stt?.providerId ?? ""}
-              onChange={(e) => updateVoice("stt", { providerId: e.currentTarget.value || undefined })}
-            >
-              <option value="">LLMと同じ</option>
-              {cfg.providers.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label || p.baseUrl}
-                </option>
-              ))}
-            </select>
-          </label>
-          <ModelField
-            label="モデル"
-            value={cfg.stt?.model ?? ""}
-            placeholder="whisper-1"
-            baseUrl={sttProvider?.baseUrl ?? ""}
-            apiKey={sttProvider?.apiKey ?? ""}
-            onChange={(model) => updateVoice("stt", { model })}
-          />
-          <label class="tc-field">
-            <span>無音の待機時間（秒）</span>
-            <input
-              type="number"
-              min={0}
-              max={5}
-              step={0.1}
-              value={settings.sttSilenceDuration}
-              onInput={(e) => {
-                const parsed = Number.parseFloat(e.currentTarget.value);
-                update({ ...settings, sttSilenceDuration: Number.isFinite(parsed) ? parsed : 0.8 });
-              }}
-            />
-          </label>
+            <div class="task-model-item">
+              <span data-tip="キャラクターの発言を読み上げる音声モデルです。「ブラウザ標準」を選ぶとブラウザの音声合成を使います。">
+                読み上げ
+              </span>
+              <div class="task-model-fields">
+                <div class="task-model-field">{renderVoicePicker("tts")}</div>
+                {cfg.tts?.model.trim() ? (
+                  <>
+                    <div class="task-model-field">
+                      <OptionsPicker
+                        value={cfg.tts?.voice ?? ""}
+                        placeholder="alloy"
+                        baseUrl={ttsProvider?.baseUrl ?? ""}
+                        apiKey={ttsProvider?.apiKey ?? ""}
+                        onChange={(voice) => updateVoice("tts", { voice: voice || undefined })}
+                        useOptions={useVoiceOptions}
+                        itemLabel="音声"
+                        emptyOption={{ label: "未選択" }}
+                        fallbackOptions={OPENAI_TTS_VOICES}
+                      />
+                    </div>
+                    <div class="task-model-field">
+                      <input
+                        type="number"
+                        min={0.25}
+                        max={4}
+                        step={0.05}
+                        value={cfg.tts?.speed ?? 1}
+                        aria-label="速度"
+                        title="速度"
+                        onInput={(e) => {
+                          const parsed = Number.parseFloat(e.currentTarget.value);
+                          updateVoice("tts", { speed: Number.isFinite(parsed) ? parsed : 1 });
+                        }}
+                      />
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            </div>
+
+            <div class="task-model-item">
+              <span data-tip="通話中のユーザーの発話を書き起こすモデルです。「ブラウザ標準」を選ぶとブラウザの音声認識を使います。">
+                書き起こし
+              </span>
+              <div class="task-model-fields">
+                <div class="task-model-field">{renderVoicePicker("stt")}</div>
+                <div class="task-model-field">
+                  <input
+                    type="number"
+                    min={0}
+                    max={5}
+                    step={0.1}
+                    value={settings.sttSilenceDuration}
+                    aria-label="無音の待機時間（秒）"
+                    title="無音の待機時間（秒）"
+                    onInput={(e) => {
+                      const parsed = Number.parseFloat(e.currentTarget.value);
+                      update({ ...settings, sttSilenceDuration: Number.isFinite(parsed) ? parsed : 0.8 });
+                    }}
+                  />
+                </div>
+                <div class="task-model-field">
+                  <input
+                    type="number"
+                    min={0}
+                    max={0.5}
+                    step={0.005}
+                    value={settings.micThreshold}
+                    aria-label="マイク感度（音声と判定する音量のしきい値）"
+                    title="マイク感度（音声と判定する音量のしきい値）"
+                    onInput={(e) => {
+                      const parsed = Number.parseFloat(e.currentTarget.value);
+                      update({ ...settings, micThreshold: Number.isFinite(parsed) ? parsed : 0.02 });
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div class="task-model-item">
+              <span data-tip="通話中にユーザーが話し始めたら、キャラクターの読み上げを止めて聞き取りに切り替えます。">
+                割り込み
+              </span>
+              <div class="task-model-fields">
+                <label class="task-model-field tc-role-head">
+                  <input
+                    type="checkbox"
+                    checked={settings.bargeInEnabled}
+                    onChange={(e) => update({ ...settings, bargeInEnabled: e.currentTarget.checked })}
+                  />
+                  <span class="tc-role-title">話しかけたら読み上げを停止</span>
+                </label>
+              </div>
+            </div>
           </section>
         ) : null}
 
