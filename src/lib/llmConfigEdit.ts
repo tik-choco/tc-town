@@ -16,6 +16,35 @@
 
 import type { LlmProviderV1, ModelPresetV1, SharedLlmConfigV1 } from "./llmConfig";
 
+// tc-town has no `mist-network://` pseudo-provider of its own (see
+// SettingsView.tsx's header comment), but the shared `tc-shared-llm-config-v1`
+// config is co-owned across the tik-choco app family — another app on the
+// same origin (e.g. tc-translate/tc-books) may have written a network mirror
+// provider/preset into it. `deletePreset` below must not blindly promote
+// `presets[0]` to the shared default when it happens to be one of those.
+const NETWORK_PROVIDER_URL_PREFIX = "mist-network://";
+
+function isNetworkProviderBaseUrl(baseUrl: string): boolean {
+  return baseUrl.trim().startsWith(NETWORK_PROVIDER_URL_PREFIX);
+}
+
+/**
+ * Picks a safe replacement for `config.defaultPresetId` once its previous
+ * target preset has just been removed here: the first remaining preset whose
+ * provider is NOT a `mist-network://` pseudo-provider, never an arbitrary
+ * `config.presets[0]`. Blindly promoting a network mirror row would silently
+ * flip every unset-providerId task (chat, TTS/STT) from the user's actual API
+ * provider onto the AI Network transport. Falls back to "" (unset) when every
+ * remaining preset is network-owned.
+ */
+function safeDefaultPresetFallback(config: SharedLlmConfigV1): string {
+  const nonNetwork = config.presets.find((preset) => {
+    const provider = config.providers.find((entry) => entry.id === preset.providerId);
+    return provider !== undefined && !isNetworkProviderBaseUrl(provider.baseUrl);
+  });
+  return nonNetwork?.id ?? "";
+}
+
 function newId(): string {
   return crypto.randomUUID();
 }
@@ -54,7 +83,7 @@ export function patchPreset(config: SharedLlmConfigV1, id: string, patch: Partia
 /** Removes a preset. If it was the default, the next remaining preset (if any) takes over. Callers still referencing this preset by id elsewhere (Character.llmProfileId, the タスク tab's own selection) are left to resolve to "not found" — resolvePreset falls back to the (possibly now-different) default. */
 export function deletePreset(config: SharedLlmConfigV1, id: string): void {
   config.presets = config.presets.filter((entry) => entry.id !== id);
-  if (config.defaultPresetId === id) config.defaultPresetId = config.presets[0]?.id ?? "";
+  if (config.defaultPresetId === id) config.defaultPresetId = safeDefaultPresetFallback(config);
 }
 
 /** Updates `config.tts`/`config.stt` in place from Settings UI edits. An empty `providerId` clears it (falls back to the default preset's provider). */
