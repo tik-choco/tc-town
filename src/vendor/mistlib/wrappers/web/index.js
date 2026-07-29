@@ -1,4 +1,7 @@
-import init, * as mistWasm from '../../pkg/mistlib_wasm.js';
+// Resolved by the import map in each page, which is the single place the engine
+// version is pinned. Point it at ../../mistlib-wasm/pkg/mistlib_wasm.js to run
+// against a local build instead.
+import init, * as mistWasm from '@tik-choco/mistlib';
 import { DEFAULT_SIGNALING_URL, normalizeOptions } from './options.js';
 export { DEFAULT_SIGNALING_URL, DEFAULT_NOSTR_RELAY_URL, defaultConfig } from './options.js';
 
