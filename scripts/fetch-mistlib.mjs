@@ -1,95 +1,106 @@
-// Fetches mistlib (MISTLIB_REPO/MISTLIB_REF from .env), builds the wasm
-// package with wasm-pack, and copies the output into src/vendor/mistlib
-// so the app can import it locally without committing the built wasm.
-import { config } from "dotenv";
-import { existsSync, mkdirSync, rmSync, cpSync, readFileSync, writeFileSync } from "node:fs";
+// Syncs the mistlib JS wrapper (wrappers/web) into src/vendor/mistlib.
+//
+// The engine itself is no longer built here: it's an ordinary npm dependency
+// (@tik-choco/mistlib, wasm binary included), so running this app needs no Rust
+// toolchain and no wasm-pack. All that's left to vendor is the wrapper — four
+// small text files that are maintained in their own repo and are not published
+// to npm. They're committed, so this script is an updater, not a prerequisite.
+//
+// To develop against a local engine build, set MISTLIB_LOCAL in .env instead;
+// vite.config.ts aliases the package to it. See .env.example.
+import { existsSync, mkdirSync, rmSync, renameSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const rootDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-config({ path: path.join(rootDir, ".env") });
+const envPath = path.join(rootDir, ".env");
+if (existsSync(envPath)) process.loadEnvFile(envPath);
 
-const repo = process.env.MISTLIB_REPO;
-const ref = process.env.MISTLIB_REF || "develop";
+const repo = process.env.MISTLIB_EXAMPLES_REPO;
+const ref = process.env.MISTLIB_EXAMPLES_REF || "main";
+
+const cacheDir = path.join(rootDir, ".mistlib-examples-src");
+const vendorDir = path.join(rootDir, "src", "vendor", "mistlib");
+const wrapperDir = path.join(vendorDir, "wrappers", "web");
+// Records the commit the vendored wrapper came from. Lives in the gitignored
+// cache dir so it never shows up as a spurious tracked-file change.
+const revMarkerPath = path.join(cacheDir, ".vendored-rev");
+
+const WRAPPER_FILES = ["index.js", "index.d.ts", "options.js", "package.json"];
 
 if (!repo) {
-  console.error("MISTLIB_REPO is not set in .env — copy .env.example to .env and fill it in.");
-  process.exit(1);
+  console.log("fetch-mistlib: MISTLIB_EXAMPLES_REPO not set — using the committed wrapper. Copy .env.example to .env to enable updates.");
+  process.exit(0);
 }
 
-const cacheDir = path.join(rootDir, ".mistlib-src");
-const vendorDir = path.join(rootDir, "src", "vendor", "mistlib");
-
-function run(cmd, args, cwd, extraEnv) {
+function run(cmd, args, cwd) {
   console.log(`$ ${cmd} ${args.join(" ")}`);
-  execFileSync(cmd, args, {
-    cwd,
-    stdio: "inherit",
-    env: extraEnv ? { ...process.env, ...extraEnv } : process.env,
-  });
+  execFileSync(cmd, args, { cwd, stdio: "inherit" });
+}
+
+function gitOutput(args, cwd) {
+  return execFileSync("git", args, { cwd }).toString().trim();
 }
 
 if (!existsSync(path.join(cacheDir, ".git"))) {
   rmSync(cacheDir, { recursive: true, force: true });
   run("git", ["clone", repo, cacheDir]);
+  // `config --get`, not `remote get-url`: the latter applies any
+  // url.<base>.insteadOf rewrites (a git@github.com: for https:// rule is a
+  // common global setting), so it would never compare equal to the configured
+  // URL and we'd "repoint" on every single run.
+} else if (gitOutput(["config", "--get", "remote.origin.url"], cacheDir) !== repo) {
+  console.log(`origin changed — repointing ${path.basename(cacheDir)} at ${repo}`);
+  run("git", ["remote", "set-url", "origin", repo], cacheDir);
 }
 
 run("git", ["fetch", "origin", ref], cacheDir);
-run("git", ["checkout", "FETCH_HEAD"], cacheDir);
+const resolvedSha = gitOutput(["rev-parse", "FETCH_HEAD"], cacheDir);
 
-// Skip the rebuild + re-vendor when the vendored output already comes from
-// this exact commit — wasm-pack output is not byte-reproducible, so an
-// unconditional rebuild dirties src/vendor/mistlib on every run.
-const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: cacheDir })
-  .toString()
-  .trim();
-const stampPath = path.join(vendorDir, ".mistlib-commit");
-if (existsSync(stampPath) && readFileSync(stampPath, "utf8").trim() === commit) {
-  console.log(`mistlib (${ref} @ ${commit.slice(0, 12)}) already vendored — skipping build`);
+const previousSha = existsSync(revMarkerPath) ? readFileSync(revMarkerPath, "utf8").trim() : null;
+if (previousSha === resolvedSha && existsSync(wrapperDir)) {
+  console.log(`mistlib wrapper (${ref} @ ${resolvedSha.slice(0, 7)}) already up to date`);
   process.exit(0);
 }
 
-const wasmCrateDir = path.join(cacheDir, "mistlib-wasm");
-const wasmPackBin = process.platform === "win32" ? "wasm-pack.exe" : "wasm-pack";
-// Remap the builder's home directory in embedded rustc debug paths so the
-// committed wasm never leaks the local username (checked before vendoring).
-run(wasmPackBin, ["build", "--target", "web", "--release"], wasmCrateDir, {
-  RUSTFLAGS: [process.env.RUSTFLAGS, `--remap-path-prefix=${os.homedir()}=/build`]
-    .filter(Boolean)
-    .join(" "),
-});
+run("git", ["checkout", "FETCH_HEAD"], cacheDir);
 
-const builtWasm = readFileSync(path.join(wasmCrateDir, "pkg", "mistlib_wasm_bg.wasm"));
-const homeToken = path.basename(os.homedir());
-if (builtWasm.includes(Buffer.from(`\\Users\\${homeToken}`)) || builtWasm.includes(Buffer.from(`/home/${homeToken}`))) {
-  console.error(`Built wasm embeds the local username (${homeToken}) — refusing to vendor it.`);
+const sourceDir = path.join(cacheDir, "wrappers", "web");
+if (!existsSync(sourceDir)) {
+  console.error(`wrappers/web not found in ${sourceDir} — check MISTLIB_EXAMPLES_REPO/MISTLIB_EXAMPLES_REF in .env.`);
   process.exit(1);
 }
 
-rmSync(vendorDir, { recursive: true, force: true });
-mkdirSync(vendorDir, { recursive: true });
-cpSync(path.join(wasmCrateDir, "pkg"), path.join(vendorDir, "pkg"), { recursive: true });
-const wrapperDestDir = path.join(vendorDir, "wrappers", "web");
-mkdirSync(wrapperDestDir, { recursive: true });
-cpSync(path.join(cacheDir, "wrappers", "web"), wrapperDestDir, { recursive: true });
+// Stage the new wrapper and only swap it in once it's complete: writing
+// straight into vendorDir would leave the committed tree half-replaced if
+// anything below failed.
+const stageDir = `${wrapperDir}.new`;
+rmSync(stageDir, { recursive: true, force: true });
+mkdirSync(stageDir, { recursive: true });
+for (const name of WRAPPER_FILES) {
+  const from = path.join(sourceDir, name);
+  if (!existsSync(from)) {
+    console.error(`wrapper file ${name} is missing from ${sourceDir} — the upstream layout changed.`);
+    process.exit(1);
+  }
+  writeFileSync(path.join(stageDir, name), readFileSync(from));
+}
 
-// wasm-pack writes its own "ignore everything" .gitignore into pkg/, but
-// this output is committed (not actually gitignored) — drop it so it
-// doesn't silently exclude the vendored files from version control again.
-rmSync(path.join(vendorDir, "pkg", ".gitignore"), { force: true });
+// The wrapper imports the engine by package name, so there is nothing to
+// rewrite — it resolves from node_modules exactly as it does from the import
+// map the upstream examples use.
+const importLine = readFileSync(path.join(stageDir, "index.js"), "utf8")
+  .split("\n")
+  .find((line) => line.startsWith("import init"));
+if (!importLine?.includes("@tik-choco/mistlib")) {
+  console.error(`Wrapper no longer imports @tik-choco/mistlib (got: ${importLine ?? "no import init line"}) — the packaging assumption changed.`);
+  process.exit(1);
+}
 
-// Rewrite the wasm import path: the wrapper normally lives at
-// wrappers/web/index.js next to a sibling mistlib-wasm/pkg directory, but
-// here pkg/ is vendored alongside wrappers/, one level up.
-const wrapperIndexPath = path.join(wrapperDestDir, "index.js");
-const wrapperSrc = readFileSync(wrapperIndexPath, "utf8").replace(
-  "../../mistlib-wasm/pkg/mistlib_wasm.js",
-  "../../pkg/mistlib_wasm.js",
-);
-writeFileSync(wrapperIndexPath, wrapperSrc);
+rmSync(wrapperDir, { recursive: true, force: true });
+mkdirSync(path.dirname(wrapperDir), { recursive: true });
+renameSync(stageDir, wrapperDir);
 
-writeFileSync(stampPath, `${commit}\n`);
-
-console.log(`mistlib (${ref}) built and vendored into src/vendor/mistlib`);
+writeFileSync(revMarkerPath, resolvedSha + "\n");
+console.log(`mistlib wrapper (${ref} @ ${resolvedSha.slice(0, 7)}) vendored into src/vendor/mistlib/wrappers/web`);

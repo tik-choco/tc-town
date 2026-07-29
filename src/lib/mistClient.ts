@@ -25,6 +25,7 @@ import {
   storage_kv_delete,
   type MediaEventPayload,
 } from "../vendor/mistlib/wrappers/web/index.js";
+import { mistSignalingConfig } from "./mistSignaling";
 
 export {
   EVENT_NEIGHBORS,
@@ -94,7 +95,9 @@ export async function getNode(): Promise<InstanceType<typeof MistNode>> {
   if (node) return node;
   if (!initPromise) {
     initPromise = (async () => {
-      const n = new MistNode(localNodeId());
+      // inviteSalt/inviteCode scope peer discovery to the tik-choco family
+      // namespace — without them this node can't find any other app's peers.
+      const n = new MistNode(localNodeId(), mistSignalingConfig());
       await n.init();
       n.onEvent((eventType, fromId, payload, roomId) => {
         eventListeners.forEach((l) => l(eventType, fromId, payload, roomId ?? ""));
