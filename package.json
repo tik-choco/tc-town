@@ -17,7 +17,7 @@
     "@pixiv/three-vrm": "^3.4.2",
     "@pixiv/three-vrm-animation": "^3.5.4",
     "@tik-choco/mistai": "github:tik-choco-lab/mistai",
-    "@tik-choco/mistlib": "0.6.0",
+    "@tik-choco/mistlib": "0.6.1",
     "lucide-preact": "^1.16.0",
     "preact": "^10.29.3",
     "three": "^0.180.0"
