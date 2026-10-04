@@ -10,7 +10,10 @@ import { Onboarding } from './components/Onboarding'
 import { markOnboardingDone, shouldShowOnboarding, subscribeOnboardingRequests } from './lib/onboarding'
 import { subscribeNavigationRequests, type AppView } from './lib/navigation'
 import { parseCatalogShareInput } from './lib/catalog'
-import { listCharacters } from './lib/characterStorage'
+import { useLlmConfig, useRoomProviders } from '@tik-choco/mistai/preact'
+import { rooms } from './lib/network'
+import { loadProviderSettings, subscribeProviderSettings } from './lib/llmSettings'
+import { listCharacters, subscribeCharacters } from './lib/characterStorage'
 import './app.css'
 
 // NAV id/label pairs are user-facing text only — the underlying view id stays
@@ -50,6 +53,15 @@ function resolveInitialView(): AppView {
 
 export function App() {
   const [view, setView] = useState<AppView>(() => resolveInitialView())
+  const { config } = useLlmConfig()
+  const [local, setLocal] = useState(loadProviderSettings)
+  const [characters, setCharacters] = useState(listCharacters)
+  useEffect(() => subscribeProviderSettings(() => setLocal(loadProviderSettings())), [])
+  useEffect(() => subscribeCharacters(() => setCharacters(listCharacters())), [])
+  useRoomProviders({ config, roomProvide: local.roomProvide, consumers: rooms,
+    taskRefs: [...Object.values(local.tasks).map(task => task.ref), ...characters.map(c => c.llmRef)],
+    settingsOpen: view === 'settings',
+  })
 
   // Lets any view (e.g. a CTA button) ask the shell to switch views without
   // prop-threading a setView callback through every view.

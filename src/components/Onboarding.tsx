@@ -1,7 +1,6 @@
 import { useState } from "preact/hooks";
 import {
   Sparkles,
-  Cpu,
   UserPlus,
   Check,
   X,
@@ -11,13 +10,12 @@ import {
   Users,
   MessagesSquare,
   Phone,
-  Plug,
 } from "lucide-preact";
-import { emptyLlmConfig, ensureProvider, loadLlmConfig, resolvePreset, saveLlmConfig } from "../lib/llmConfig";
-import { requestApiChatCompletionStreaming, type LlmCallTarget } from "../lib/llm";
-import { useModelOptions } from "../lib/models";
-import { createCharacter } from "../lib/characterStorage";
-import { OptionsPicker } from "../views/SettingsView";
+import { LlmSettings } from '@tik-choco/mistai/preact';
+import { useAppSettings } from '../hooks/useAppSettings';
+import { localSettingsAdapter, TASK_IDS } from '../lib/llmSettings';
+import { aiMessages } from '../i18n/ai';
+import { createCharacter } from '../lib/characterStorage';
 import "../styles/onboarding.css";
 
 // First-run wizard shown by app.tsx as a modal overlay: welcome -> LLM
@@ -27,29 +25,6 @@ import "../styles/onboarding.css";
 
 const STEP_COUNT = 4;
 
-/** Field-level classes so {@link OptionsPicker} matches the wizard's ob-* form styling. */
-const MODEL_PICKER_CLASS_NAMES = {
-  row: "ob-model-row",
-  input: "ob-input",
-  select: "ob-input",
-  iconBtn: "ob-icon-btn",
-  footer: "ob-model-footer",
-  status: "ob-model-status",
-  linkBtn: "ob-link-btn",
-};
-
-interface LlmDraft {
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-}
-
-type TestState =
-  | { phase: "idle" }
-  | { phase: "busy" }
-  | { phase: "ok" }
-  | { phase: "error"; message: string };
-
 function inputValue(event: Event): string {
   return (event.target as HTMLInputElement).value;
 }
@@ -57,66 +32,10 @@ function inputValue(event: Event): string {
 export function Onboarding(props: { onClose: () => void }) {
   const [step, setStep] = useState(0);
 
-  // LLM draft starts from the shared config's current default preset so
-  // re-running the wizard shows (and edits) the real current connection
-  // instead of blank fields.
-  const [llm, setLlm] = useState<LlmDraft>(() => {
-    const target = resolvePreset(loadLlmConfig() ?? emptyLlmConfig());
-    return {
-      baseUrl: target?.baseUrl ?? "",
-      apiKey: target?.apiKey ?? "",
-      model: target?.model ?? "",
-    };
-  });
-  const [testState, setTestState] = useState<TestState>({ phase: "idle" });
-
-  const [charName, setCharName] = useState("");
+  const { language } = useAppSettings();
+  const t = aiMessages(language);
+  const [charName, setCharName] = useState('');
   const [createdName, setCreatedName] = useState<string | null>(null);
-
-  function updateLlm(patch: Partial<LlmDraft>) {
-    setLlm((prev) => ({ ...prev, ...patch }));
-    // Edited connection values invalidate a previous test result.
-    setTestState({ phase: "idle" });
-  }
-
-  /** Persists the draft into the default preset (the one new characters use): edits it in place if one already exists, otherwise creates a provider+preset and sets it as default. */
-  function saveLlmDraft() {
-    const cfg = loadLlmConfig() ?? emptyLlmConfig();
-    const providerId = ensureProvider(cfg, { baseUrl: llm.baseUrl, apiKey: llm.apiKey });
-    const existingDefault = cfg.presets.find((p) => p.id === cfg.defaultPresetId);
-    if (existingDefault) {
-      existingDefault.providerId = providerId;
-      existingDefault.model = llm.model.trim();
-    } else {
-      const preset = { id: crypto.randomUUID(), label: "デフォルト", providerId, model: llm.model.trim() };
-      cfg.presets.push(preset);
-      cfg.defaultPresetId = preset.id;
-    }
-    saveLlmConfig(cfg);
-  }
-
-  async function handleTest() {
-    if (testState.phase === "busy") return;
-    setTestState({ phase: "busy" });
-    const target: LlmCallTarget = { baseUrl: llm.baseUrl, apiKey: llm.apiKey, model: llm.model };
-    try {
-      await requestApiChatCompletionStreaming(
-        target,
-        [{ role: "user", content: "接続テストです。「OK」とだけ返してください。" }],
-        undefined,
-        () => {},
-      );
-      setTestState({ phase: "ok" });
-    } catch (error) {
-      setTestState({ phase: "error", message: error instanceof Error ? error.message : String(error) });
-    }
-  }
-
-  function handleLlmNext() {
-    saveLlmDraft();
-    setStep(2);
-  }
-
   function handleCreateCharacter() {
     const name = charName.trim();
     if (!name) return;
@@ -149,71 +68,7 @@ export function Onboarding(props: { onClose: () => void }) {
           </div>
         )}
 
-        {step === 1 && (
-          <div class="ob-body">
-            <div class="ob-step-head">
-              <Cpu size={22} />
-              <h2 class="ob-title">LLMの接続設定</h2>
-            </div>
-            <p class="ob-text">
-              キャラクターとの会話に使う LLM を設定します。OpenAI 互換の API ならどれでも使えます
-              （OpenAI、LM Studio、Ollama など）。
-            </p>
-
-            <div class="ob-field">
-              <label class="ob-label">ベースURL</label>
-              <input
-                class="ob-input"
-                type="text"
-                placeholder="例: https://api.openai.com/v1 / http://localhost:1234/v1"
-                value={llm.baseUrl}
-                onInput={(e) => updateLlm({ baseUrl: inputValue(e) })}
-              />
-            </div>
-            <div class="ob-field">
-              <label class="ob-label">APIキー（不要なら空欄）</label>
-              <input
-                class="ob-input"
-                type="password"
-                placeholder="sk-..."
-                value={llm.apiKey}
-                onInput={(e) => updateLlm({ apiKey: inputValue(e) })}
-              />
-            </div>
-            <div class="ob-field">
-              <label class="ob-label">モデル</label>
-              <OptionsPicker
-                value={llm.model}
-                placeholder="例: gpt-4o-mini"
-                baseUrl={llm.baseUrl}
-                apiKey={llm.apiKey}
-                onChange={(model) => updateLlm({ model })}
-                useOptions={useModelOptions}
-                itemLabel="モデル"
-                classNames={MODEL_PICKER_CLASS_NAMES}
-              />
-            </div>
-
-            <div class="ob-test-row">
-              <button
-                class="ob-btn"
-                type="button"
-                onClick={() => void handleTest()}
-                disabled={testState.phase === "busy" || !llm.baseUrl.trim()}
-              >
-                {testState.phase === "busy" ? <span class="spinner" /> : <Plug size={16} />}
-                {testState.phase === "busy" ? "接続中..." : "接続テスト"}
-              </button>
-              {testState.phase === "ok" && (
-                <span class="ob-test-ok">
-                  <Check size={16} />
-                  接続できました！
-                </span>
-              )}
-            </div>
-            {testState.phase === "error" && <p class="ob-error">接続に失敗しました: {testState.message}</p>}
-          </div>
-        )}
+        {step === 1 && <div class="ob-body ob-ai-settings"><LlmSettings locale={language} title={t.ai} localSettings={localSettingsAdapter} tasks={TASK_IDS.map(id => ({ id, label: t[id], reasoning: true }))} voice={{ tts: {}, stt: {} }} /></div>}
 
         {step === 2 && (
           <div class="ob-body">
@@ -306,7 +161,7 @@ export function Onboarding(props: { onClose: () => void }) {
               </button>
             )}
             {step === 1 && (
-              <button class="ob-btn ob-btn-accent" type="button" onClick={handleLlmNext}>
+              <button class="ob-btn ob-btn-accent" type="button" onClick={() => setStep(2)}>
                 保存して次へ
                 <ArrowRight size={16} />
               </button>

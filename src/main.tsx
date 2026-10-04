@@ -8,6 +8,7 @@ import { startCharacterIndexPublisher } from './lib/characterIndexPublisher'
 import { startTownBackupPublisher } from './lib/townBackupPublisher'
 import { writeAppManifest } from './lib/appManifest'
 import { BUS_VERSION } from './lib/sharedBus'
+import { migrateCharacterModels } from './lib/characterStorage'
 import { migrateLegacyProviderSettingsToShared } from './lib/llmSettings'
 
 // Applied synchronously before the first paint so there's no flash of the
@@ -23,6 +24,7 @@ if (initialTheme !== 'system') {
 // settings into the shared tc-shared-llm-config-v1 key. Must run before any
 // view reads loadProviderSettings()/loadLlmConfig() — see lib/llmSettings.ts.
 migrateLegacyProviderSettingsToShared()
+migrateCharacterModels()
 
 render(
   <AppSettingsProvider>

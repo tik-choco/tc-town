@@ -10,7 +10,7 @@
 //     everywhere else in the app.
 //   - lib/llm.ts's requestChatCompletion for the actual streaming call —
 //     the exact same entry point ChatView's ConversationEngine uses.
-//   - lib/llmConfig.ts's resolvePreset/DEFAULT_LLM_PROFILE_ID for "is an LLM
+//   - lib/llmConfig.ts's resolveModel/DEFAULT_LLM_PROFILE_ID for "is an LLM
 //     configured" and to resolve the shared default preset.
 //   - vrm/library.ts's importVrmFile (checksum-dedup) + listVrmModels to
 //     cache a remote VRM into the same shared library CharacterAvatar's VRM
@@ -31,10 +31,10 @@
 // untouched by this file.
 
 import type { Avatar, Character, ChatMessage, VrmAvatar } from "../types";
-import { DEFAULT_LLM_PROFILE_ID } from "../types";
+import { loadProviderSettings } from "./llmSettings";
 import { coerceCharacter, listCharacters, toPersonaPrompt } from "./characterStorage";
 import { requestChatCompletion } from "./llm";
-import { emptyLlmConfig, loadLlmConfig, resolvePreset } from "./llmConfig";
+import { emptyLlmConfig, loadLlmConfig, resolveModel } from '@tik-choco/mistai/llm-config';
 import { getNode, storage_get } from "./mistClient";
 import { ensureDidIdentity } from "../crypto/didIdentity";
 import { fetchCatalogPayload, listCatalogEntries, type CatalogEntry } from "./catalog";
@@ -295,7 +295,7 @@ function buildPlazaMessages(
 /** True when the default LLM preset has enough set to attempt a request (mirrors SettingsView's upstreamConfigured check). */
 export function hasConfiguredLlmProfile(): boolean {
   const cfg = loadLlmConfig() ?? emptyLlmConfig();
-  const target = resolvePreset(cfg, DEFAULT_LLM_PROFILE_ID);
+  const target = resolveModel(cfg, loadProviderSettings().tasks.plaza?.ref);
   return Boolean(target?.baseUrl.trim() && target?.model.trim());
 }
 
@@ -373,13 +373,14 @@ export function startPlazaTalk(actors: PlazaActor[], handlers: PlazaTalkHandlers
       let emotionClassified = false;
 
       try {
-        const full = await requestChatCompletion(DEFAULT_LLM_PROFILE_ID, messages, {
+        const full = await requestChatCompletion(undefined, messages, {
+        task: "plaza",
           onDelta: (_delta, accumulated) => {
             if (stopped || controller.signal.aborted) return;
             handlers.onLine?.(speaker.key, accumulated, { streaming: true });
             if (!emotionClassified && accumulated.length >= EMOTION_CLASSIFY_MIN_LENGTH) {
               emotionClassified = true;
-              maybeClassifyEmotion(speaker.key, accumulated, DEFAULT_LLM_PROFILE_ID);
+              maybeClassifyEmotion(speaker.key, accumulated);
             }
           },
         });
@@ -387,7 +388,7 @@ export function startPlazaTalk(actors: PlazaActor[], handlers: PlazaTalkHandlers
 
         const text = full.trim();
         if (text) {
-          if (!emotionClassified) maybeClassifyEmotion(speaker.key, text, DEFAULT_LLM_PROFILE_ID);
+          if (!emotionClassified) maybeClassifyEmotion(speaker.key, text);
           transcript.push({ speakerKey: speaker.key, text });
           handlers.onLine?.(speaker.key, text, { streaming: false });
         }

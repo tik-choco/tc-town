@@ -10,7 +10,7 @@
 // style (extractJson/coerceScore defensive parsing, localStorage history,
 // requestChatCompletion call shape) intentionally mirrors evaluation.ts.
 
-import { DEFAULT_LLM_PROFILE_ID, type Character, type CharacterSheet, type ChatMessage } from "../types";
+import { type Character, type CharacterSheet, type ChatMessage } from "../types";
 import { requestChatCompletion } from "./llm";
 import { getWorld, type WorldSetting } from "./worlds";
 
@@ -302,7 +302,7 @@ function coerceSuggestions(value: unknown): string[] {
 
 /**
  * キャラクターシート（渡された character の現在の内容 — 未保存 draft でもよい）
- * の完成度を LLM judge に採点させる。character.llmProfileId を使う。
+ * の完成度を LLM judge に採点させる。character.llmRef を使う。
  * 成功時は保存してから resolve。LLM 呼び出し自体の失敗はユーザー向け日本語
  * メッセージの Error を throw する。
  */
@@ -329,11 +329,11 @@ export async function evaluateCharacterSheet(character: Character): Promise<Char
     { role: "user", content: userContent },
   ];
 
-  const profileId = character.llmProfileId || DEFAULT_LLM_PROFILE_ID;
+  const ref = character.llmRef;
 
   let responseText: string;
   try {
-    responseText = await requestChatCompletion(profileId, messages, { temperature: 0.2 });
+    responseText = await requestChatCompletion(ref, messages, { task: "characterEvaluation", reasoningEffort: character.reasoningEffort });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     throw new Error(`キャラクター評価に失敗しました: ${detail}`);

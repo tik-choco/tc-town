@@ -7,7 +7,7 @@
 // can show a history of past evaluations. STREAMING_SCHEMA is intentionally
 // not ported — tc-town has no streaming/broadcast feature.
 
-import { DEFAULT_LLM_PROFILE_ID, type Character, type ChatMessage } from "../types";
+import { type Character, type ChatMessage } from "../types";
 import { requestChatCompletion } from "./llm";
 import { USER_SPEAKER_ID, type ConversationSession } from "./conversation";
 
@@ -293,7 +293,7 @@ export async function evaluateSession(
 
   let responseText: string;
   try {
-    responseText = await requestChatCompletion(DEFAULT_LLM_PROFILE_ID, messages, { temperature: 0.2 });
+    responseText = await requestChatCompletion(undefined, messages, { task: "evaluation" });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     throw new Error(`会話の評価に失敗しました: ${detail}`);

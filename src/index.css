@@ -92,6 +92,14 @@
   /* Theme mapping for the shared LLM Network UI (@tik-choco/mistai/ui.css).
      Values reference the app variables, so the dark overrides below flow
      through without needing their own --mistai-* block. */
+  --mistai-surface-2: var(--surface-2);
+  --mistai-border-strong: var(--border-strong);
+  --mistai-primary: var(--accent);
+  --mistai-primary-soft: var(--accent-bg);
+  --mistai-focus: var(--accent);
+  --mistai-focus-ring: var(--accent-bg);
+  --mistai-danger-text: var(--danger);
+  --mistai-font-family: var(--sans);
   --mistai-border: var(--border);
   --mistai-surface: var(--surface);
   --mistai-text: var(--text);

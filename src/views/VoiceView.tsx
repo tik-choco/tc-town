@@ -1,9 +1,11 @@
+import { aiMessages } from '../i18n/ai';
+import { loadAppSettings } from '../lib/appSettings';
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Loader2, Mic, MicOff, PhoneCall, PhoneOff } from "lucide-preact";
 import type { ChatMessage, Character } from "../types";
 import { listCharacters, subscribeCharacters, toPersonaPrompt } from "../lib/characterStorage";
 import { loadProviderSettings } from "../lib/llmSettings";
-import { emptyLlmConfig, loadLlmConfig, resolvePreset, resolveVoice, type SharedLlmConfigV1 } from "../lib/llmConfig";
+import { emptyLlmConfig, loadLlmConfig, resolveVoice } from '@tik-choco/mistai/llm-config';
 import { requestChatCompletion } from "../lib/llm";
 import { maybeClassifyEmotion } from "../lib/emotionClassifier";
 import { getWorld } from "../lib/worlds";
@@ -16,7 +18,6 @@ import {
   type MicSession,
   type SpeechHandle,
   type UtteranceHandle,
-  type VoiceTarget,
 } from "../lib/voice";
 import { CharacterAvatar } from "../components/CharacterAvatar";
 import "../styles/voice.css";
@@ -48,54 +49,6 @@ const MIN_RECORDING_BYTES = 2000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Like resolveVoice(), but tolerates an empty/unset model: the request layer
- * has its own fallbacks (voice.ts sends whisper-1/tts-1 when model is empty)
- * and some servers ignore the model field entirely — e.g. a local whisper
- * server whose model listing fails still transcribes fine. Only the
- * connection (provider) has to resolve. resolveVoice() itself is part of the
- * vendored shared-config contract, so the relaxation lives here app-side.
- */
-function resolveVoiceTarget(cfg: SharedLlmConfigV1, kind: "tts" | "stt"): VoiceTarget | null {
-  const strict = resolveVoice(cfg, kind);
-  if (strict) return strict;
-
-  const vc = cfg[kind];
-  const provider = vc?.providerId
-    ? cfg.providers.find((p) => p.id === vc.providerId)
-    : (() => {
-        const target = resolvePreset(cfg);
-        return target ? cfg.providers.find((p) => p.id === target.providerId) : undefined;
-      })();
-  if (!provider) return null;
-
-  const resolved: VoiceTarget = { baseUrl: provider.baseUrl, apiKey: provider.apiKey, model: vc?.model ?? "" };
-  if (vc?.voice !== undefined) resolved.voice = vc.voice;
-  if (vc?.speed !== undefined) resolved.speed = vc.speed;
-  return resolved;
-}
-
-/**
- * Explains WHY resolveVoiceTarget() would fail for tts/stt, in user-facing
- * terms — a bare null used to surface as a generic "未設定" message even when
- * the real problem was a dangling provider reference or an unresolvable
- * default preset. Returns null when both connections resolve fine.
- */
-function describeVoiceSetupProblem(cfg: SharedLlmConfigV1): string | null {
-  for (const kind of ["tts", "stt"] as const) {
-    const label = kind === "tts" ? "読み上げ（TTS）" : "書き起こし（STT）";
-    const vc = cfg[kind];
-    if (vc?.providerId) {
-      if (!cfg.providers.some((p) => p.id === vc.providerId)) {
-        return `${label}の接続先が見つかりません（削除された可能性があります）。設定画面の「音声」タブで接続先を選び直してください。`;
-      }
-    } else if (!resolvePreset(cfg)) {
-      return `${label}の接続先が「LLMと同じ」ですが、既定のLLMプリセットが解決できません。設定画面の「プリセット」タブで既定プリセットと接続先を確認するか、「音声」タブで接続先を直接指定してください。`;
-    }
-  }
-  return null;
 }
 
 export function VoiceView() {
@@ -164,12 +117,11 @@ export function VoiceView() {
 
   async function runCallLoop(character: Character) {
     const cfg = loadLlmConfig() ?? emptyLlmConfig();
-    const ttsTarget = resolveVoiceTarget(cfg, "tts");
-    const sttTarget = resolveVoiceTarget(cfg, "stt");
+    const ttsTarget = resolveVoice(cfg, "tts");
+    const sttTarget = resolveVoice(cfg, "stt");
     if (!ttsTarget || !sttTarget) {
       setErrorMessage(
-        describeVoiceSetupProblem(cfg) ??
-          "TTS/STTが設定されていません。設定画面の「音声」タブから接続先を設定してください。",
+        aiMessages(loadAppSettings().language).voiceSetup,
       );
       activeRef.current = false;
       setCallActive(false);
@@ -182,7 +134,7 @@ export function VoiceView() {
 
     let session: MicSession;
     try {
-      session = await createMicSession();
+      session = await createMicSession(settings.micDeviceId);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "マイクを利用できませんでした。");
       activeRef.current = false;
@@ -241,7 +193,7 @@ export function VoiceView() {
 
         let reply: string;
         try {
-          reply = await requestChatCompletion(character.llmProfileId, history);
+          reply = await requestChatCompletion(character.llmRef, history, { task: "voice", reasoningEffort: character.reasoningEffort });
         } catch (err) {
           setErrorMessage(err instanceof Error ? err.message : "応答の生成に失敗しました。");
           continue;
@@ -252,11 +204,11 @@ export function VoiceView() {
         appendLine("assistant", reply);
         // Fire-and-forget: classify the reply's emotion for the VRM face as
         // soon as the text is settled, without waiting for TTS to finish.
-        maybeClassifyEmotion(character.id, reply, character.llmProfileId);
+        maybeClassifyEmotion(character.id, reply, character.llmRef);
 
         setStatus("speaking");
         setSpeaking(true);
-        const handle = speak(ttsTarget, reply, character.voiceName);
+        const handle = speak({ ...ttsTarget, model: character.voiceModel || ttsTarget.model }, reply, character.voiceName, loadAppSettings().language);
         speechRef.current = handle;
         let bargedIn = false;
         if (settings.bargeInEnabled && !mutedRef.current) {

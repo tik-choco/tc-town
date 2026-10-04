@@ -47,24 +47,19 @@ import {
 } from "../lib/exportImport";
 import { autoFillCharacterSheet, improveCharacterSheetField, sendInterviewMessage } from "../lib/growth";
 import { MarkdownText } from "../lib/markdown";
-import { emptyLlmConfig, loadLlmConfig, resolveVoice, subscribeLlmConfig, type SharedLlmConfigV1 } from "../lib/llmConfig";
-import { OPENAI_TTS_VOICES, useVoiceOptions } from "../lib/voices";
+import { resolveVoice } from '@tik-choco/mistai/llm-config';
+
 import { listWorlds, subscribeWorlds, type WorldSetting } from "../lib/worlds";
 import { CharacterAvatar } from "../components/CharacterAvatar";
 import { AvatarPicker } from "../components/AvatarPicker";
-import { OptionsPicker } from "./SettingsView";
+import { TwoPaneModelPicker, ChoicePicker, useLlmConfig, resolveTtsVoiceOptions, buildTtsVoiceOptionValues } from '@tik-choco/mistai/preact';
+import { fetchVoices } from '@tik-choco/mistai';
+import { roomIdFromBaseUrl } from '@tik-choco/mistai/llm-config';
+import { rooms } from '../lib/network';
+import { localSettingsAdapter, loadProviderSettings } from '../lib/llmSettings';
+import { useAppSettings } from '../hooks/useAppSettings';
+import { aiMessages } from '../i18n/ai';
 import "../styles/characters.css";
-
-/** Field-level CSS classes so {@link OptionsPicker} matches this view's cv-* form styling instead of the settings screen's tc-* one. */
-const VOICE_PICKER_CLASS_NAMES = {
-  row: "cv-model-row",
-  input: "cv-input",
-  select: "cv-input",
-  iconBtn: "cv-icon-btn",
-  footer: "cv-model-footer",
-  status: "cv-model-status",
-  linkBtn: "cv-link-btn",
-};
 
 interface SheetFieldDef {
   key: Exclude<keyof CharacterSheet, "name">;
@@ -117,6 +112,8 @@ function markPublishPromptDismissed(characterId: string): void {
 }
 
 export function CharactersView() {
+  const { language } = useAppSettings();
+  const t = aiMessages(language);
   const [characters, setCharacters] = useState<Character[]>(() => listCharacters());
   const [selectedId, setSelectedId] = useState<string | null>(() => listCharacters()[0]?.id ?? null);
   const [draft, setDraft] = useState<Character | null>(null);
@@ -150,14 +147,22 @@ export function CharactersView() {
   const copiedTimer = useRef<number | undefined>(undefined);
   const [publishPromptDismissed, setPublishPromptDismissed] = useState(false);
 
-  // Shared LLM config (providers/presets/tts) — subscribed so edits made from
-  // the Settings screen (or another tik-choco app on this origin) are
-  // reflected here without needing to leave and re-enter this view.
-  const [llmConfig, setLlmConfig] = useState<SharedLlmConfigV1>(() => loadLlmConfig() ?? emptyLlmConfig());
-  useEffect(() => subscribeLlmConfig((next) => setLlmConfig(next ?? emptyLlmConfig())), []);
-  const presets = llmConfig.presets;
-  const resolvedTts = useMemo(() => resolveVoice(llmConfig, "tts"), [llmConfig]);
-  const ttsEndpoint = { baseUrl: resolvedTts?.baseUrl ?? "", apiKey: resolvedTts?.apiKey ?? "" };
+  const { config: llmConfig } = useLlmConfig();
+  const resolvedTts = useMemo(() => resolveVoice(llmConfig, 'tts'), [llmConfig]);
+  const [voiceOptions, setVoiceOptions] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!resolvedTts) { setVoiceOptions([]); return; }
+    const room = roomIdFromBaseUrl(resolvedTts.baseUrl);
+    if (room) {
+      const consumer = rooms.roomConsumer(room);
+      const refresh = () => setVoiceOptions(resolveTtsVoiceOptions({ engine: 'network', consumerStatus: consumer.status, fetchedApiVoices: [] }));
+      refresh(); void consumer.connect(room);
+      return consumer.onStatusChange(refresh);
+    }
+    void fetchVoices(resolvedTts.baseUrl, resolvedTts.apiKey).then(voices => { if (!cancelled) setVoiceOptions(resolveTtsVoiceOptions({ engine: 'api', fetchedApiVoices: voices })); });
+    return () => { cancelled = true; };
+  }, [resolvedTts?.baseUrl, resolvedTts?.apiKey]);
 
   const [worlds, setWorlds] = useState<WorldSetting[]>(() => listWorlds());
 
@@ -849,23 +854,13 @@ export function CharactersView() {
                 </div>
               ))}
 
-              <div class="cv-field-row">
+              <div class="cv-field-row mistai-surface">
                 <div class="cv-field">
-                  <label class="cv-label">LLMプリセット</label>
-                  <select
-                    class="cv-input"
-                    value={draft.llmProfileId}
-                    onChange={(e) => updateTop("llmProfileId", inputValue(e))}
-                  >
-                    {presets.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.label}
-                      </option>
-                    ))}
-                    {!presets.some((p) => p.id === draft.llmProfileId) && (
-                      <option value={draft.llmProfileId}>{draft.llmProfileId}（不明）</option>
-                    )}
-                  </select>
+                  <label class="cv-label">{t.model}</label>
+                  <TwoPaneModelPicker providers={llmConfig.providers} value={draft.llmRef} inheritedValue={loadProviderSettings().tasks.default?.ref ?? llmConfig.defaultModel} recent={loadProviderSettings().recentModels} label={t.model} clearLabel={t.follow} onChange={ref => {
+                    updateTop('llmRef', ref);
+                    if (ref) { const local = loadProviderSettings(); localSettingsAdapter.set({ ...local, recentModels: [ref, ...local.recentModels.filter(r => r.providerId !== ref.providerId || r.model !== ref.model)].slice(0, 8) }); }
+                  }} />
                 </div>
                 <div class="cv-field">
                   <label class="cv-label">世界観</label>
@@ -886,26 +881,15 @@ export function CharactersView() {
                   </select>
                 </div>
                 <div class="cv-field">
-                  <label class="cv-label">音声（ボイス名）</label>
-                  <OptionsPicker
-                    value={draft.voiceName ?? ""}
-                    placeholder="例: alloy"
-                    baseUrl={ttsEndpoint.baseUrl}
-                    apiKey={ttsEndpoint.apiKey}
-                    onChange={(voice) => updateTop("voiceName", voice || undefined)}
-                    useOptions={useVoiceOptions}
-                    itemLabel="音声"
-                    emptyOption={{ label: "デフォルト", alwaysShow: true }}
-                    fallbackOptions={OPENAI_TTS_VOICES}
-                    classNames={VOICE_PICKER_CLASS_NAMES}
-                  />
+                  <label class="cv-label">{t.voiceName}</label>
+                  <ChoicePicker value={draft.voiceName ?? ''} label={t.voiceName} options={buildTtsVoiceOptionValues(voiceOptions, draft.voiceName ?? '').map(value => ({ value, label: value || t.follow }))} onChange={voice => updateTop('voiceName', voice || undefined)} />
                 </div>
                 <div class="cv-field">
-                  <label class="cv-label">音声モデル</label>
+                  <label class="cv-label">{t.voiceModel}</label>
                   <input
                     class="cv-input"
                     type="text"
-                    placeholder="例: tts-1"
+                    placeholder={t.follow}
                     value={draft.voiceModel ?? ""}
                     onInput={(e) => updateTop("voiceModel", inputValue(e) || undefined)}
                   />

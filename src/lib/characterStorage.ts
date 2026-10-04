@@ -1,3 +1,5 @@
+import { emptyLlmConfig, isModelRef, loadLlmConfig, presetIdToRef } from '@tik-choco/mistai/llm-config';
+import { effort, loadProviderSettings } from './llmSettings';
 // Character data model — owned by the "Character data model + LLM-interview
 // character growth" workstream. Characters live in a single localStorage
 // array (JSON, parsed defensively — never trust stored content); avatar image
@@ -58,6 +60,12 @@ function coerceSheet(value: unknown): CharacterSheet {
 export function coerceCharacter(value: unknown): Character | null {
   if (!value || typeof value !== "object") return null;
   const c = value as Record<string, unknown>;
+  const config = loadLlmConfig() ?? emptyLlmConfig();
+  const oldId = isStringField(c.llmProfileId) ? c.llmProfileId : DEFAULT_LLM_PROFILE_ID;
+  const legacy = c.llmMigrationV2 !== true;
+  const oldProfile = legacy ? loadProviderSettings().legacyProfileRefs?.[oldId] : undefined;
+  const oldPreset = legacy ? config.presets.find(p => p.id === oldId) : undefined;
+  const ref = isModelRef(c.llmRef) ? c.llmRef : legacy ? oldProfile?.ref ?? presetIdToRef(config, oldId) : undefined;
   if (typeof c.id !== "string" || c.id === "") return null;
   const now = new Date().toISOString();
   return {
@@ -66,7 +74,10 @@ export function coerceCharacter(value: unknown): Character | null {
     updatedAt: isStringField(c.updatedAt) ? c.updatedAt : now,
     avatar: isAvatar(c.avatar) ? c.avatar : null,
     sheet: coerceSheet(c.sheet),
-    llmProfileId: isStringField(c.llmProfileId) ? c.llmProfileId : DEFAULT_LLM_PROFILE_ID,
+    llmProfileId: oldId,
+    llmRef: ref,
+    reasoningEffort: typeof c.reasoningEffort === 'string' ? effort(c.reasoningEffort) : legacy && (oldProfile || oldPreset) ? effort(oldProfile?.reasoningEffort ?? oldPreset?.reasoningEffort) : undefined,
+    llmMigrationV2: true,
     voiceModel: isStringField(c.voiceModel) ? c.voiceModel : undefined,
     voiceName: isStringField(c.voiceName) ? c.voiceName : undefined,
     worldId: isStringField(c.worldId) ? c.worldId : undefined,
@@ -191,6 +202,7 @@ export function createCharacter(name: string): Character {
     avatar: null,
     sheet: emptyCharacterSheet(name.trim()),
     llmProfileId: DEFAULT_LLM_PROFILE_ID,
+    llmMigrationV2: true,
   };
   const all = readAll();
   all.push(character);
@@ -233,4 +245,11 @@ export function toPersonaPrompt(sheet: CharacterSheet, world?: WorldSetting): st
     `設定にない事柄は${name}らしく自然に補ってかまいませんが、設定と矛盾しないようにしてください。`;
 
   return [header, ...sections, footer].join("\n\n");
+}
+
+export function migrateCharacterModels(): void {
+  try {
+    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]');
+    if (Array.isArray(raw) && raw.some(c => c && c.llmMigrationV2 !== true)) writeAll(raw.map(coerceCharacter).filter((c): c is Character => !!c));
+  } catch { /* malformed storage remains untouched */ }
 }

@@ -1,3 +1,4 @@
+import type { ModelRefV1 } from '@tik-choco/mistai/llm-config';
 // Expression switching via a separate lightweight LLM request: after (or
 // while) a character's reply streams in, ask the LLM to classify the reply's
 // emotion and write it to lib/emotionStore.ts so the VRM face follows the
@@ -7,7 +8,7 @@
 // land long after the line was spoken). See getExpressionFeatureStatus() for
 // what the settings UI displays.
 
-import { DEFAULT_LLM_PROFILE_ID, type ChatMessage } from "../types";
+import { type ChatMessage } from "../types";
 import { EMOTION_NAMES, setCharacterEmotion, type EmotionName } from "./emotionStore";
 import { loadProviderSettings, type ExpressionMode } from "./llmSettings";
 import { requestChatCompletion } from "./llm";
@@ -145,7 +146,7 @@ function parseEmotion(response: string): EmotionName {
 export function maybeClassifyEmotion(
   characterId: string,
   text: string,
-  presetId?: string,
+  ref?: ModelRefV1,
 ): void {
   try {
     const trimmed = text.trim();
@@ -180,12 +181,11 @@ export function maybeClassifyEmotion(
       { role: "user", content: truncated },
     ];
 
-    const effectivePresetId = presetId && presetId.trim() ? presetId : DEFAULT_LLM_PROFILE_ID;
     const startedAt = Date.now();
 
     notifyListeners();
 
-    requestChatCompletion(effectivePresetId, messages, { temperature: 0 })
+    requestChatCompletion(ref, messages, { task: "expression" })
       .then((response) => {
         const latencyMs = Date.now() - startedAt;
         const emotion = parseEmotion(response);
