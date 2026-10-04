@@ -19,7 +19,13 @@ export async function requestChatCompletion(ref: ModelRefV1 | undefined, message
   const reasoningEffort = options?.reasoningEffort ?? task?.reasoningEffort ?? 'none';
   const room = roomIdFromBaseUrl(target.baseUrl);
   if (room) {
-    // The OpenAI tunnel carries per-task reasoning effort as well as vision messages.
+    // Image content parts cannot be carried by llm_request.
+    const hasImages = messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === 'image_url'));
+    if (!hasImages) {
+      const text = await rooms.requestRoomChat(room, messages, { model: target.model, reasoningEffort, onDelta: options?.onDelta });
+      if (!text.trim()) throw new MistaiError('UPSTREAM_BAD_RESPONSE', aiMessages(loadAppSettings().language).emptyResponse);
+      return text;
+    }
     const response = await rooms.requestRoomOpenAi(room, { path: '/chat/completions', method: 'POST', contentType: 'application/json', body: JSON.stringify({ model: target.model, messages, reasoning_effort: reasoningEffort, stream: false }) });
     if (response.status < 200 || response.status >= 300) throw new MistaiError('UPSTREAM_BAD_RESPONSE', response.body);
     const body = JSON.parse(response.body) as { choices?: { message?: { content?: string } }[] };

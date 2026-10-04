@@ -4,8 +4,9 @@ import { loadProviderSettings, migrateLegacyProviderSettingsToShared, saveProvid
 import { requestChatCompletion } from './llm';
 import { synthesizeSpeech, transcribeAudio } from './voice';
 import { coerceCharacter, migrateCharacterModels } from './characterStorage';
-const mocks = vi.hoisted(() => ({ tts: vi.fn(), stt: vi.fn(), oai: vi.fn() }));
-vi.mock('./network', () => ({ rooms: { requestRoomTts: mocks.tts, requestRoomStt: mocks.stt, requestRoomOpenAi: mocks.oai } }));
+import type { ChatMessage } from '../types';
+const mocks = vi.hoisted(() => ({ tts: vi.fn(), stt: vi.fn(), chat: vi.fn(), oai: vi.fn() }));
+vi.mock('./network', () => ({ rooms: { requestRoomTts: mocks.tts, requestRoomStt: mocks.stt, requestRoomChat: mocks.chat, requestRoomOpenAi: mocks.oai } }));
 vi.mock('./idbBlobStore', () => ({ deleteBlob: vi.fn() }));
 let writes = 0;
 beforeEach(() => {
@@ -67,13 +68,42 @@ describe('provider-room integration', () => {
   it('uses the chosen room for chat effort, voice, language and auto voice models', async () => {
     seed(); migrateLegacyProviderSettingsToShared(); const config = loadLlmConfig()!;
     const room = config.providers.find(p => p.baseUrl === 'mist-network://team')!;
-    mocks.oai.mockResolvedValue({ status: 200, body: JSON.stringify({ choices: [{ message: { content: 'Room' } }] }) });
-    await requestChatCompletion({ providerId: room.id, model: 'chosen' }, [{ role: 'user', content: 'Test' }], { reasoningEffort: 'xhigh' });
-    expect(mocks.oai.mock.calls[0][0]).toBe('team'); expect(JSON.parse(mocks.oai.mock.calls[0][1].body).reasoning_effort).toBe('xhigh');
+    const messages: ChatMessage[] = [{ role: 'user', content: 'Test' }];
+    const onDelta = vi.fn();
+    mocks.chat.mockImplementation(async (_room, _messages, options) => {
+      options.onDelta('Ro', 'Ro');
+      expect(onDelta).toHaveBeenCalledWith('Ro', 'Ro');
+      options.onDelta('om', 'Room');
+      return 'Room';
+    });
+    expect(await requestChatCompletion({ providerId: room.id, model: 'chosen' }, messages, { reasoningEffort: 'xhigh', onDelta })).toBe('Room');
+    expect(mocks.chat).toHaveBeenCalledWith('team', messages, { model: 'chosen', reasoningEffort: 'xhigh', onDelta });
+    expect(onDelta.mock.calls).toEqual([['Ro', 'Ro'], ['om', 'Room']]);
+    expect(mocks.oai).not.toHaveBeenCalled();
     const target = { baseUrl: 'mist-network://voice-room', apiKey: '', model: 'network-auto', voice: 'saved' };
     const audio = new Blob(['audio']); mocks.tts.mockResolvedValue(audio); mocks.stt.mockResolvedValue('Text');
     await synthesizeSpeech(target, 'Hello', { voice: 'character', lang: 'ja' });
     expect(mocks.tts).toHaveBeenCalledWith('voice-room', { text: 'Hello', model: undefined, voice: 'character', lang: 'ja' });
     await transcribeAudio(target, audio, 'speech.ogg'); expect(mocks.stt).toHaveBeenCalledWith('voice-room', { audio, model: undefined, fileName: 'speech.ogg' });
+  });
+  it.each(['none', 'max'] as const)('uses the room task effort %s when no request override is supplied', async reasoningEffort => {
+    seed(); migrateLegacyProviderSettingsToShared(); const config = loadLlmConfig()!;
+    const room = config.providers.find(p => p.baseUrl === 'mist-network://team')!;
+    const local = loadProviderSettings();
+    local.tasks.growth = { ref: { providerId: room.id, model: 'selected' }, reasoningEffort }; saveProviderSettings(local);
+    mocks.chat.mockResolvedValue('Room');
+    expect(await requestChatCompletion(undefined, [{ role: 'user', content: 'Test' }], { task: 'growth' })).toBe('Room');
+    expect(mocks.chat).toHaveBeenCalledWith('team', [{ role: 'user', content: 'Test' }], { model: 'selected', reasoningEffort, onDelta: undefined });
+    expect(mocks.oai).not.toHaveBeenCalled();
+  });
+  it('keeps vision/OCR image content parts on the room OpenAI tunnel', async () => {
+    seed(); migrateLegacyProviderSettingsToShared(); const config = loadLlmConfig()!;
+    const room = config.providers.find(p => p.baseUrl === 'mist-network://team')!;
+    // Image parts are not representable in the text-only llm_request type.
+    const messages = [{ role: 'user', content: [{ type: 'text', text: 'Read this image' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,aW1hZ2U=' } }] }] as unknown as ChatMessage[];
+    mocks.oai.mockResolvedValue({ status: 200, body: JSON.stringify({ choices: [{ message: { content: 'OCR text' } }] }) });
+    expect(await requestChatCompletion({ providerId: room.id, model: 'vision' }, messages, { reasoningEffort: 'high' })).toBe('OCR text');
+    expect(mocks.oai).toHaveBeenCalledWith('team', { path: '/chat/completions', method: 'POST', contentType: 'application/json', body: JSON.stringify({ model: 'vision', messages, reasoning_effort: 'high', stream: false }) });
+    expect(mocks.chat).not.toHaveBeenCalled();
   });
 });
