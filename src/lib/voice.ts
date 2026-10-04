@@ -1,3 +1,5 @@
+import { roomIdFromBaseUrl, networkVoiceModelParam } from '@tik-choco/mistai/llm-config';
+import { rooms } from './network';
 // Voice call media I/O: OpenAI-compatible TTS ("{baseUrl}/audio/speech") and
 // STT ("{baseUrl}/audio/transcriptions") against a resolved voice target (the
 // shape lib/llmConfig.ts's resolveVoice() returns — baseUrl/apiKey/model
@@ -20,14 +22,6 @@
 // reaching STT) — no ML VAD, matching the reference Go implementation this
 // was ported from.
 //
-// @tik-choco/mistai does ship voice helpers (VoiceConsumerService /
-// VoiceProviderService), but those speak the AI Network peer protocol for
-// *sharing* a voice endpoint between devices — they don't call an
-// OpenAI-compatible HTTP endpoint directly, which is what the voice call
-// feature needs here. So this file hand-rolls fetch calls, mirroring the
-// shape of mistai's openai.ts (streamChatCompletion) and tc-assistant2's
-// openaiApi.ts (speakWithOpenAi / transcribeAudio).
-
 /** Connection + model info for one TTS or STT call — matches lib/llmConfig.ts's resolveVoice() return shape (no silenceDuration: that's app-local, see lib/llmSettings.ts). */
 export interface VoiceTarget {
   baseUrl: string;
@@ -67,16 +61,19 @@ async function readErrorDetail(response: Response): Promise<string> {
 export async function synthesizeSpeech(
   profile: VoiceTarget,
   text: string,
-  options?: { voice?: string; signal?: AbortSignal },
+  options?: { voice?: string; lang?: string; signal?: AbortSignal },
 ): Promise<Blob> {
+  const room = roomIdFromBaseUrl(profile.baseUrl);
+  if (room) return rooms.requestRoomTts(room, { text, model: networkVoiceModelParam(profile.model), voice: options?.voice || profile.voice || undefined, lang: options?.lang });
   const url = endpointUrl(profile.baseUrl, "/audio/speech");
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders(profile.apiKey) },
     signal: options?.signal,
     body: JSON.stringify({
-      model: profile.model || "tts-1",
-      voice: options?.voice ?? profile.voice ?? "alloy",
+      model: profile.model,
+      ...(options?.voice || profile.voice ? { voice: options?.voice || profile.voice } : {}),
+      ...(options?.lang ? { lang: options.lang } : {}),
       input: text,
       speed: profile.speed ?? 1,
     }),
@@ -90,10 +87,12 @@ export async function synthesizeSpeech(
 
 /** POSTs `{baseUrl}/audio/transcriptions`; resolves with the recognized text. */
 export async function transcribeAudio(profile: VoiceTarget, audio: Blob, fileName = "speech.webm"): Promise<string> {
+  const room = roomIdFromBaseUrl(profile.baseUrl);
+  if (room) return rooms.requestRoomStt(room, { audio, model: networkVoiceModelParam(profile.model), fileName });
   const url = endpointUrl(profile.baseUrl, "/audio/transcriptions");
   const formData = new FormData();
   formData.append("file", audio, fileName);
-  formData.append("model", profile.model || "whisper-1");
+  formData.append("model", profile.model);
   const response = await fetch(url, {
     method: "POST",
     headers: authHeaders(profile.apiKey),
@@ -156,11 +155,11 @@ export interface SpeechHandle {
  * Synthesizes `text` against `profile` and plays it back. `voiceOverride`
  * (a character's `voiceName`) wins over the profile's own `voice` when set.
  */
-export function speak(profile: VoiceTarget, text: string, voiceOverride?: string): SpeechHandle {
+export function speak(profile: VoiceTarget, text: string, voiceOverride?: string, lang?: string): SpeechHandle {
   const controller = new AbortController();
   const done = (async () => {
     try {
-      const blob = await synthesizeSpeech(profile, text, { voice: voiceOverride, signal: controller.signal });
+      const blob = await synthesizeSpeech(profile, text, { voice: voiceOverride, lang, signal: controller.signal });
       if (controller.signal.aborted) return;
       await playAudioBlob(blob, controller.signal);
     } catch (err) {
@@ -238,9 +237,9 @@ export interface MicSession {
  * Echo cancellation matters here specifically because the mic stays open
  * while audio plays out of the speakers during barge-in listening.
  */
-export async function createMicSession(): Promise<MicSession> {
+export async function createMicSession(deviceId?: string): Promise<MicSession> {
   const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    audio: { ...(deviceId ? { deviceId: { exact: deviceId } } : {}), echoCancellation: true, noiseSuppression: true, autoGainControl: true },
   });
   const audioCtx = new AudioContext();
   const source = audioCtx.createMediaStreamSource(stream);

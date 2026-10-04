@@ -1,281 +1,153 @@
-// tc-town's app-local LLM/voice settings. As of the shared llmConfig
-// migration, the "where do I connect / which model" data (baseUrl, apiKey,
-// model, temperature, reasoningEffort, TTS/STT endpoint, AI Network room) all
-// live in the co-owned `tc-shared-llm-config-v1` key (lib/llmConfig.ts —
-// vendored from protocol/docs/data-contracts, don't hand-edit). What's left
-// here is purely app-local: the AI Network consumer/provider *enable*
-// toggles (tc-town's own feature switches, not part of the shared contract)
-// and the STT end-of-turn silence duration (explicitly NOT part of
-// `VoiceConfigV1` per the contract — every app tunes its own silence
-// threshold). Persisted to localStorage as JSON, parsed defensively.
-
+// App-local task references, sharing and voice-call preferences.
 import {
-  emptyLlmConfig,
-  ensureProvider,
-  ensurePreset,
-  loadLlmConfig,
-  saveLlmConfig,
-  type SharedLlmConfigV1,
-} from "./llmConfig";
-import { notifyAppDataChanged } from "./appDataChangeBus";
+  createProvider, createRoomProvider, emptyLlmConfig, isModelRef, loadLlmConfig,
+  migrateSharedLlmConfig, normalizeBaseUrl, patchProvider, presetIdToRef,
+  providerKind, roomIdFromBaseUrl, saveLlmConfig, type ModelRefV1,
+} from '@tik-choco/mistai/llm-config';
+import { REASONING_EFFORT_OPTIONS, type LlmLocalSettings, type ReasoningEffort } from '@tik-choco/mistai/preact';
+import { notifyAppDataChanged } from './appDataChangeBus';
 
-const SETTINGS_KEY = "tc-town:provider-settings";
-
-export interface ProviderSettings {
-  /** AI Network room to consume/provide a shared LLM on (see lib/network.ts). Room id itself is shared — see SharedLlmConfigV1.network.roomId. */
-  networkConsumerEnabled: boolean;
-  networkProviderEnabled: boolean;
-  /** STT end-of-turn silence gap in seconds, used by the voice call feature. App-local by contract (not part of VoiceConfigV1). */
+export const SETTINGS_KEY = 'tc-town:provider-settings';
+export const TASK_IDS = ['default', 'voice', 'growth', 'characterEvaluation', 'evaluation', 'plaza', 'world', 'expression'] as const;
+export type TaskId = typeof TASK_IDS[number];
+export const EXPRESSION_MODES = ['auto', 'on', 'off'] as const;
+export type ExpressionMode = typeof EXPRESSION_MODES[number];
+export interface ProviderSettings extends LlmLocalSettings {
+  schemaVersion: 2;
   sttSilenceDuration: number;
-  /** RMS amplitude (0..1) above which mic input counts as speech (VAD threshold used for end-of-turn detection and barge-in). App-local by contract (not part of VoiceConfigV1). */
   micThreshold: number;
-  /** When true, the voice call listens while TTS plays and stops playback as soon as the user starts talking (barge-in). App-local by contract (not part of VoiceConfigV1). */
+  micDeviceId: string;
   bargeInEnabled: boolean;
-  /**
-   * VRM expression switching via a separate LLM request (lib/emotionClassifier.ts).
-   * "auto" measures the classification request's latency and turns itself off
-   * when responses are too slow to be useful; "on"/"off" force it.
-   */
   expressionMode: ExpressionMode;
+  // Pre-shared-config profile IDs, retained only for imported character migration.
+  legacyProfileRefs?: Record<string, { ref: ModelRefV1; reasoningEffort: ReasoningEffort }>;
 }
-
-export const EXPRESSION_MODES = ["auto", "on", "off"] as const;
-export type ExpressionMode = (typeof EXPRESSION_MODES)[number];
-
-/** reasoning_effort の選択肢。'none' も「思考なし」を明示送信する実値（送らない、ではない）。 */
-export const REASONING_EFFORT_OPTIONS = ["none", "minimal", "low", "medium", "high"] as const;
-
-/** 既定の reasoning_effort — ユーザー方針でデフォルトは "none"（思考なしで応答を速く）。 */
-export const DEFAULT_REASONING_EFFORT = "none";
-
+const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+export function effort(value: unknown, fallback: ReasoningEffort = 'none'): ReasoningEffort {
+  return REASONING_EFFORT_OPTIONS.includes(value as ReasoningEffort) ? value as ReasoningEffort : fallback;
+}
 export const DEFAULT_PROVIDER_SETTINGS: ProviderSettings = {
-  networkConsumerEnabled: false,
-  networkProviderEnabled: false,
-  sttSilenceDuration: 0.8,
-  micThreshold: 0.02,
-  bargeInEnabled: true,
-  expressionMode: "auto",
+  schemaVersion: 2, tasks: {}, roomProvide: {}, recentModels: [],
+  sttSilenceDuration: 0.8, micThreshold: 0.02, micDeviceId: '', bargeInEnabled: true, expressionMode: 'auto',
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-/** Exported for lib/exportImport.ts — sanitizes a parsed provider-settings record the same defensive way as {@link loadProviderSettings}. */
-export function sanitizeSettings(value: unknown): ProviderSettings {
-  if (!isRecord(value)) return { ...DEFAULT_PROVIDER_SETTINGS };
-  const sttSilenceDuration =
-    typeof value.sttSilenceDuration === "number" && Number.isFinite(value.sttSilenceDuration)
-      ? value.sttSilenceDuration
-      : DEFAULT_PROVIDER_SETTINGS.sttSilenceDuration;
-  const expressionMode = (EXPRESSION_MODES as readonly string[]).includes(value.expressionMode as string)
-    ? (value.expressionMode as ExpressionMode)
-    : DEFAULT_PROVIDER_SETTINGS.expressionMode;
-  const micThreshold =
-    typeof value.micThreshold === "number" && Number.isFinite(value.micThreshold)
-      ? Math.min(0.5, Math.max(0, value.micThreshold))
-      : DEFAULT_PROVIDER_SETTINGS.micThreshold;
-  return {
-    networkConsumerEnabled: value.networkConsumerEnabled === true,
-    networkProviderEnabled: value.networkProviderEnabled === true,
-    sttSilenceDuration,
-    micThreshold,
-    bargeInEnabled: value.bargeInEnabled !== false,
-    expressionMode,
+export function sanitizeSettings(value: unknown, config = loadLlmConfig() ?? emptyLlmConfig()): ProviderSettings {
+  const raw = record(value) ? value : {};
+  const next: ProviderSettings = {
+    ...DEFAULT_PROVIDER_SETTINGS, tasks: {}, roomProvide: {}, recentModels: [],
+    sttSilenceDuration: typeof raw.sttSilenceDuration === 'number' && Number.isFinite(raw.sttSilenceDuration) ? Math.max(0, raw.sttSilenceDuration) : 0.8,
+    micThreshold: typeof raw.micThreshold === 'number' && Number.isFinite(raw.micThreshold) ? Math.min(0.5, Math.max(0, raw.micThreshold)) : 0.02,
+    micDeviceId: typeof raw.micDeviceId === 'string' ? raw.micDeviceId : '',
+    bargeInEnabled: raw.bargeInEnabled !== false,
+    expressionMode: EXPRESSION_MODES.includes(raw.expressionMode as ExpressionMode) ? raw.expressionMode as ExpressionMode : 'auto',
   };
+  const oldDefault = config.presets.find(p => p.id === config.defaultPresetId);
+  const legacy = raw.schemaVersion !== 2;
+  if (record(raw.legacyProfileRefs)) {
+    next.legacyProfileRefs = {};
+    for (const [id, value] of Object.entries(raw.legacyProfileRefs)) {
+      if (record(value) && isModelRef(value.ref)) next.legacyProfileRefs[id] = { ref: value.ref, reasoningEffort: effort(value.reasoningEffort) };
+    }
+  }
+  const tasks = record(raw.tasks) ? raw.tasks : {};
+  for (const id of new Set([...TASK_IDS, ...Object.keys(tasks)])) {
+    const task = record(tasks[id]) ? tasks[id] : {};
+    const presetId = typeof task.presetId === 'string' ? task.presetId : typeof tasks[id] === 'string' ? tasks[id] as string : '';
+    const preset = config.presets.find(p => p.id === presetId);
+    const ref = isModelRef(task.ref) ? task.ref : legacy && presetId ? presetIdToRef(config, presetId) : undefined;
+    next.tasks[id] = { ref, reasoningEffort: effort(task.reasoningEffort, legacy ? effort(preset?.reasoningEffort ?? oldDefault?.reasoningEffort) : 'none') };
+  }
+  if (record(raw.roomProvide)) for (const [id, value] of Object.entries(raw.roomProvide)) {
+    if (record(value)) next.roomProvide[id] = { enabled: value.enabled === true, shared: Array.isArray(value.shared) ? value.shared.filter(isModelRef) : [] };
+  }
+  if (Array.isArray(raw.recentModels)) {
+    next.recentModels = raw.recentModels.filter(isModelRef).filter((ref, index, refs) => refs.findIndex(r => r.providerId === ref.providerId && r.model === ref.model) === index).slice(0, 8);
+  }
+  if (legacy) {
+    const room = config.providers.find(p => roomIdFromBaseUrl(p.baseUrl) === config.network.roomId && providerKind(p) === 'room');
+    if (room && !next.roomProvide[room.id]) {
+      const ids = Array.isArray(raw.networkSharedPresetIds) ? raw.networkSharedPresetIds : Array.isArray(raw.sharedPresetIds) ? raw.sharedPresetIds : [config.defaultPresetId];
+      const shared = ids.flatMap(id => { const ref = typeof id === 'string' ? presetIdToRef(config, id) : undefined; return ref ? [ref] : []; });
+      next.roomProvide[room.id] = { enabled: raw.networkProviderEnabled === true, shared };
+    }
+  }
+  return next;
 }
 
+const listeners = new Set<() => void>();
+export function subscribeProviderSettings(cb: () => void): () => void {
+  listeners.add(cb);
+  const onStorage = (event: StorageEvent) => { if (event.key === SETTINGS_KEY) cb(); };
+  window.addEventListener('storage', onStorage);
+  return () => { listeners.delete(cb); window.removeEventListener('storage', onStorage); };
+}
 export function loadProviderSettings(): ProviderSettings {
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return { ...DEFAULT_PROVIDER_SETTINGS };
-    return sanitizeSettings(JSON.parse(raw));
-  } catch {
-    return { ...DEFAULT_PROVIDER_SETTINGS };
-  }
+  try { return sanitizeSettings(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}')); }
+  catch { return sanitizeSettings({}); }
 }
-
 export function saveProviderSettings(settings: ProviderSettings): void {
-  try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-  } catch (error) {
-    console.warn("tc-town: failed to persist provider settings", error);
-  }
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); }
+  catch (error) { console.warn('tc-town: failed to persist provider settings', error); }
+  listeners.forEach(cb => cb());
   notifyAppDataChanged();
 }
+export const localSettingsAdapter = {
+  get: loadProviderSettings,
+  set: (next: LlmLocalSettings) => saveProviderSettings({ ...loadProviderSettings(), ...next }),
+  subscribe: subscribeProviderSettings,
+};
 
-// -----------------------------------------------------------------------------
-// One-time migration: tc-town's pre-shared-config local settings -> the
-// shared tc-shared-llm-config-v1 key. See
-// protocol/docs/data-contracts/docs/llm-config.md's "マイグレーション規則"
-// (loadLlmConfig-or-empty, ensureProvider/ensurePreset only ever append,
-// defaultPresetId/tts/stt/network.roomId set only if currently empty).
-//
-// Idempotent by construction: this reads the OLD (pre-migration) shape
-// directly off the raw localStorage record — profiles/tts/stt/networkRoomId/
-// defaultProfileId. Once migrated, saveProviderSettings() below overwrites
-// the key with the new reduced shape (no `profiles` array), so a second call
-// finds nothing to migrate and returns immediately. Re-running against the
-// same untouched legacy data is also safe on its own merits: ensureProvider/
-// ensurePreset dedupe, and the defaultPresetId/tts/stt/network.roomId writes
-// are gated on "currently empty" — nothing is ever double-applied or
-// overwritten.
-// -----------------------------------------------------------------------------
-
-interface LegacyLlmProfile {
-  id: string;
-  label: string;
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-  temperature: number;
-  reasoningEffort?: string;
-}
-
-interface LegacyVoiceProfile {
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-  voice?: string;
-  speed?: number;
-  silenceDuration?: number;
-}
-
-// The untouched factory defaults tc-town shipped before this migration
-// (see git history of this file). An install that never customized these
-// contributes nothing useful to the shared catalog, so migrating them would
-// just clutter every other app's provider/preset list with a dead
-// "http://localhost:1234/v1" entry (LLM) or an unconfigured (empty apiKey)
-// "https://api.openai.com/v1" entry (TTS/STT).
-const PRISTINE_LLM_PROFILE = { baseUrl: "http://localhost:1234/v1", apiKey: "", model: "" };
-const PRISTINE_TTS = { baseUrl: "https://api.openai.com/v1", apiKey: "", model: "tts-1" };
-const PRISTINE_STT = { baseUrl: "https://api.openai.com/v1", apiKey: "", model: "whisper-1" };
-
-function sanitizeLegacyProfile(value: unknown): LegacyLlmProfile | null {
-  if (!isRecord(value)) return null;
-  const id = typeof value.id === "string" ? value.id : "";
-  if (!id) return null;
-  const temperature =
-    typeof value.temperature === "number" && Number.isFinite(value.temperature) ? value.temperature : 0.7;
-  const reasoningEffort =
-    typeof value.reasoningEffort === "string" &&
-    (value.reasoningEffort === "" || (REASONING_EFFORT_OPTIONS as readonly string[]).includes(value.reasoningEffort))
-      ? value.reasoningEffort
-      : undefined;
-  return {
-    id,
-    label: typeof value.label === "string" ? value.label : id,
-    baseUrl: typeof value.baseUrl === "string" ? value.baseUrl : "",
-    apiKey: typeof value.apiKey === "string" ? value.apiKey : "",
-    model: typeof value.model === "string" ? value.model : "",
-    temperature: Math.min(2, Math.max(0, temperature)),
-    reasoningEffort,
-  };
-}
-
-function sanitizeLegacyVoice(value: unknown): LegacyVoiceProfile | null {
-  if (!isRecord(value)) return null;
-  const voice: LegacyVoiceProfile = {
-    baseUrl: typeof value.baseUrl === "string" ? value.baseUrl : "",
-    apiKey: typeof value.apiKey === "string" ? value.apiKey : "",
-    model: typeof value.model === "string" ? value.model : "",
-  };
-  if (typeof value.voice === "string") voice.voice = value.voice;
-  if (typeof value.speed === "number" && Number.isFinite(value.speed)) voice.speed = value.speed;
-  if (typeof value.silenceDuration === "number" && Number.isFinite(value.silenceDuration)) {
-    voice.silenceDuration = value.silenceDuration;
-  }
-  return voice;
-}
-
-function isPristine(
-  voice: LegacyVoiceProfile,
-  pristine: { baseUrl: string; apiKey: string; model: string },
-): boolean {
-  return voice.baseUrl.trim() === pristine.baseUrl && voice.apiKey === pristine.apiKey && voice.model.trim() === pristine.model;
-}
-
-/**
- * Migrates tc-town's legacy `profiles`/`tts`/`stt`/`networkRoomId`/
- * `defaultProfileId` fields (if still present in the raw stored record) into
- * the shared `tc-shared-llm-config-v1` key, then rewrites this app's own
- * settings key to the new reduced local shape. No-ops (does nothing, touches
- * nothing) once already migrated. Call once at startup, before any view reads
- * `loadProviderSettings()`/the shared config.
- */
+// Load migration is append-only for shared connections; legacy shared fields never change.
 export function migrateLegacyProviderSettingsToShared(): void {
-  let raw: string | null;
-  try {
-    raw = localStorage.getItem(SETTINGS_KEY);
-  } catch {
-    return;
-  }
-  if (!raw) return;
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return;
-  }
-  if (!isRecord(parsed) || !Array.isArray(parsed.profiles)) return; // already migrated (or nothing to migrate)
-
-  const cfg: SharedLlmConfigV1 = loadLlmConfig() ?? emptyLlmConfig();
-
-  // --- profiles -> providers + presets (id preserved so Character.llmProfileId keeps resolving) ---
-  for (const rawProfile of parsed.profiles) {
-    const profile = sanitizeLegacyProfile(rawProfile);
-    if (!profile) continue;
-    if (
-      profile.baseUrl.trim() === PRISTINE_LLM_PROFILE.baseUrl &&
-      profile.apiKey === PRISTINE_LLM_PROFILE.apiKey &&
-      profile.model.trim() === PRISTINE_LLM_PROFILE.model
-    ) {
-      continue; // untouched built-in default — nothing worth sharing
+  const config = loadLlmConfig() ?? emptyLlmConfig();
+  let raw: Record<string, unknown> = {};
+  try { const parsed = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}'); if (record(parsed)) raw = parsed; } catch { /* use defaults */ }
+  let changed = migrateSharedLlmConfig(config).changed;
+  const refs: NonNullable<ProviderSettings['legacyProfileRefs']> = {};
+  const ensure = (baseUrl: string, apiKey: string, label = baseUrl) => {
+    const url = normalizeBaseUrl(baseUrl);
+    const existing = config.providers.find(p => normalizeBaseUrl(p.baseUrl) === url && p.apiKey === apiKey);
+    if (existing) return existing.id;
+    const id = createProvider(config, label); patchProvider(config, id, { baseUrl: url, apiKey }); changed = true; return id;
+  };
+  if (raw.schemaVersion !== 2 && Array.isArray(raw.profiles)) {
+    for (const profile of raw.profiles) {
+      if (!record(profile) || typeof profile.id !== 'string' || typeof profile.baseUrl !== 'string' || !profile.baseUrl.trim() || typeof profile.model !== 'string' || !profile.model.trim()) continue;
+      const providerId = ensure(profile.baseUrl, typeof profile.apiKey === 'string' ? profile.apiKey : '', typeof profile.label === 'string' ? profile.label : profile.baseUrl);
+      refs[profile.id] = { ref: { providerId, model: profile.model }, reasoningEffort: effort(profile.reasoningEffort) };
+      const provider = config.providers.find(p => p.id === providerId)!;
+      if (!provider.modelsFetchedAt && !provider.models?.includes(profile.model)) { provider.models = [...provider.models ?? [], profile.model]; changed = true; }
     }
-    const providerId = ensureProvider(cfg, { label: profile.label, baseUrl: profile.baseUrl, apiKey: profile.apiKey });
-    ensurePreset(cfg, {
-      id: profile.id,
-      label: profile.label,
-      providerId,
-      model: profile.model,
-      temperature: profile.temperature,
-      reasoningEffort: profile.reasoningEffort,
-    });
+    if (!config.defaultModel && typeof raw.defaultProfileId === 'string' && refs[raw.defaultProfileId]) { config.defaultModel = refs[raw.defaultProfileId].ref; changed = true; }
+    for (const kind of ['tts', 'stt'] as const) {
+      const voice = raw[kind];
+      if (!config[kind] && record(voice) && typeof voice.baseUrl === 'string' && typeof voice.model === 'string' && voice.model && typeof voice.apiKey === 'string' && (voice.apiKey || !voice.baseUrl.includes('api.openai.com'))) {
+        config[kind] = { providerId: ensure(voice.baseUrl, voice.apiKey), model: voice.model, ...(typeof voice.voice === 'string' ? { voice: voice.voice } : {}), ...(typeof voice.speed === 'number' ? { speed: voice.speed } : {}) }; changed = true;
+      }
+    }
+    if (typeof raw.networkRoomId === 'string' && raw.networkRoomId.trim()) {
+      const room = createRoomProvider(config, { roomId: raw.networkRoomId }); changed ||= !room.existed;
+      if (!record(raw.roomProvide)) raw.roomProvide = {};
+      (raw.roomProvide as Record<string, unknown>)[room.id] = { enabled: raw.networkProviderEnabled === true, shared: config.defaultModel && config.providers.some(p => p.id === config.defaultModel!.providerId && providerKind(p) === 'http') ? [config.defaultModel] : [] };
+    }
   }
-
-  // --- defaultProfileId -> defaultPresetId (only if not already set by some other app) ---
-  const defaultProfileId = typeof parsed.defaultProfileId === "string" ? parsed.defaultProfileId : "";
-  if (!cfg.defaultPresetId && defaultProfileId && cfg.presets.some((p) => p.id === defaultProfileId)) {
-    cfg.defaultPresetId = defaultProfileId;
+  if (changed) saveLlmConfig(config);
+  if (raw.schemaVersion !== 2) {
+    const settings = sanitizeSettings(raw, config);
+    if (Object.keys(refs).length) {
+      settings.legacyProfileRefs = refs;
+      const oldDefault = typeof raw.defaultProfileId === 'string' ? refs[raw.defaultProfileId] : undefined;
+      const oldTasks = record(raw.tasks) ? raw.tasks : {};
+      for (const id of TASK_IDS) {
+        const oldTask = record(oldTasks[id]) ? oldTasks[id] : {};
+        const oldId = typeof oldTask.presetId === 'string' ? oldTask.presetId : '';
+        const previous = refs[oldId];
+        if (previous && !settings.tasks[id].ref) settings.tasks[id].ref = previous.ref;
+        if (oldTask.reasoningEffort === undefined && (previous || oldDefault)) settings.tasks[id].reasoningEffort = (previous ?? oldDefault)!.reasoningEffort;
+      }
+    }
+    const oldStt = raw.stt;
+    if (record(oldStt) && typeof oldStt.silenceDuration === 'number') settings.sttSilenceDuration = oldStt.silenceDuration;
+    saveProviderSettings(settings);
   }
-
-  // --- tts / stt -> shared VoiceConfigV1 (silenceDuration stays local) ---
-  const legacyTts = sanitizeLegacyVoice(parsed.tts);
-  if (legacyTts && legacyTts.baseUrl.trim() && !isPristine(legacyTts, PRISTINE_TTS) && !cfg.tts) {
-    const providerId = ensureProvider(cfg, { baseUrl: legacyTts.baseUrl, apiKey: legacyTts.apiKey });
-    cfg.tts = { providerId, model: legacyTts.model, voice: legacyTts.voice, speed: legacyTts.speed };
-  }
-
-  const legacyStt = sanitizeLegacyVoice(parsed.stt);
-  if (legacyStt && legacyStt.baseUrl.trim() && !isPristine(legacyStt, PRISTINE_STT) && !cfg.stt) {
-    const providerId = ensureProvider(cfg, { baseUrl: legacyStt.baseUrl, apiKey: legacyStt.apiKey });
-    cfg.stt = { providerId, model: legacyStt.model };
-  }
-
-  // --- networkRoomId -> shared network.roomId (only if not already set) ---
-  const roomId = typeof parsed.networkRoomId === "string" ? parsed.networkRoomId.trim() : "";
-  if (!cfg.network.roomId && roomId) cfg.network.roomId = roomId;
-
-  saveLlmConfig(cfg);
-
-  // --- rewrite the local key to the new reduced shape ---
-  saveProviderSettings({
-    networkConsumerEnabled: parsed.networkConsumerEnabled === true,
-    networkProviderEnabled: parsed.networkProviderEnabled === true,
-    sttSilenceDuration: legacyStt?.silenceDuration ?? DEFAULT_PROVIDER_SETTINGS.sttSilenceDuration,
-    micThreshold: DEFAULT_PROVIDER_SETTINGS.micThreshold,
-    bargeInEnabled: DEFAULT_PROVIDER_SETTINGS.bargeInEnabled,
-    expressionMode: sanitizeSettings(parsed).expressionMode,
-  });
 }

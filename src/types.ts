@@ -1,3 +1,5 @@
+import type { ModelRefV1 } from '@tik-choco/mistai/llm-config';
+import type { ReasoningEffort } from '@tik-choco/mistai/preact';
 // Shared domain types for tc-town. This file is the cross-cutting contract
 // between the LLM/network layer, the character model, avatar rendering, and
 // conversation orchestration — kept deliberately small and additive so the
@@ -10,22 +12,7 @@ export interface ChatMessage {
   content: string;
 }
 
-// LLM connection/model config (baseUrl/apiKey/model) no longer lives in
-// tc-town's own types — it's shared across the tik-choco app family via the
-// `tc-shared-llm-config-v1` localStorage key (see lib/llmConfig.ts, vendored
-// from protocol/docs/data-contracts). `LlmProfile`/`VoiceProfile` used to hold
-// that connection info locally; they're gone. What remains local to tc-town
-// is only a *reference* to a shared preset id (see `DEFAULT_LLM_PROFILE_ID`
-// and `Character.llmProfileId` below).
-
-/**
- * Reserved id meaning "use the app-wide default preset". Historically the id
- * of tc-town's own built-in default `LlmProfile`; now just a sentinel that,
- * when it doesn't match any preset in the shared config (the common case —
- * migration deliberately never seeds a preset under this id, see
- * lib/llmSettings.ts's pristine-default skip rule), falls through to
- * `SharedLlmConfigV1.defaultPresetId` via `resolvePreset`'s own fallback.
- */
+// Legacy character imports may still contain this ID. New calls use llmRef.
 export const DEFAULT_LLM_PROFILE_ID = "default";
 
 export type AvatarKind = "image" | "vrm";
@@ -82,13 +69,11 @@ export interface Character {
   updatedAt: string;
   avatar: Avatar | null;
   sheet: CharacterSheet;
-  /**
-   * `DEFAULT_LLM_PROFILE_ID` or a `ModelPresetV1.id` from the shared LLM
-   * config (lib/llmConfig.ts). Field name kept as-is (not renamed to
-   * "PresetId") so existing character data keeps resolving unchanged —
-   * legacy `LlmProfile.id` values became preset ids 1:1 during migration.
-   */
+  /** Read-only legacy ID for older character exports. */
   llmProfileId: string;
+  llmRef?: ModelRefV1;
+  reasoningEffort?: ReasoningEffort;
+  llmMigrationV2?: boolean;
   voiceModel?: string;
   voiceName?: string;
   /** Selected world setting (lib/worlds.ts WorldSetting.id), or undefined for none. */

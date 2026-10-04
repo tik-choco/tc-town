@@ -63,8 +63,6 @@ export interface ConversationConfig {
   maxAutoTurns: number;
   /** Delay between auto turns, in ms. */
   autoDelayMs: number;
-  /** Sampling temperature passed through to the LLM (undefined = profile default). */
-  temperature?: number;
 }
 
 export const DEFAULT_CONVERSATION_CONFIG: ConversationConfig = {
@@ -604,15 +602,15 @@ export class ConversationEngine {
 
     try {
       const startedAt = Date.now();
-      const full = await requestChatCompletion(character.llmProfileId, messages, {
-        temperature: this.config.temperature,
+      const full = await requestChatCompletion(character.llmRef, messages, {
+        task: "default", reasoningEffort: character.reasoningEffort,
         onDelta: (_delta, accumulated) => {
           if (controller.signal.aborted) return;
           this.streaming = { speakerId, text: accumulated };
           this.emit();
           if (!emotionClassified && accumulated.length >= EMOTION_CLASSIFY_MIN_LENGTH) {
             emotionClassified = true;
-            maybeClassifyEmotion(speakerId, accumulated, character.llmProfileId);
+            maybeClassifyEmotion(speakerId, accumulated, character.llmRef);
           }
         },
       });
@@ -622,7 +620,7 @@ export class ConversationEngine {
 
       const text = full.trim();
       if (!emotionClassified && text) {
-        maybeClassifyEmotion(speakerId, text, character.llmProfileId);
+        maybeClassifyEmotion(speakerId, text, character.llmRef);
       }
       if (text) this.appendEntry(speakerId, text, latencyMs);
       return true;

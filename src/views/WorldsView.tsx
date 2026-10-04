@@ -4,7 +4,7 @@ import type { WorldSetting } from "../lib/worlds";
 import { createWorld, deleteWorld, getWorld, listWorlds, saveWorld, subscribeWorlds } from "../lib/worlds";
 import { listCharacters, subscribeCharacters } from "../lib/characterStorage";
 import { requestChatCompletion } from "../lib/llm";
-import { DEFAULT_LLM_PROFILE_ID, type Character, type ChatMessage } from "../types";
+import { type Character, type ChatMessage } from "../types";
 import { CharacterAvatar } from "../components/CharacterAvatar";
 import "../styles/worlds.css";
 
@@ -197,7 +197,7 @@ export function WorldsView() {
     setEnrichError(null);
     try {
       const messages = buildEnrichMessages(draft, members);
-      const result = await requestChatCompletion(DEFAULT_LLM_PROFILE_ID, messages);
+      const result = await requestChatCompletion(undefined, messages, { task: "world" });
       const cleaned = result.trim();
       if (!cleaned) throw new Error("AIから応答がありませんでした。");
       updateDraft("description", cleaned);

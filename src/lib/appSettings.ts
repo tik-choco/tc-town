@@ -8,9 +8,9 @@ const SETTINGS_KEY = "tc-town:app-settings";
 
 /** "system" follows the OS's prefers-color-scheme; light/dark are explicit overrides. */
 export type Theme = "light" | "dark" | "system";
-export type Language = "ja" | "en";
+export type Language = "ja" | "en" | "zh-CN" | "zh-TW";
 
-export const LANGUAGES: Language[] = ["ja", "en"];
+export const LANGUAGES: Language[] = ["ja", "en", "zh-CN", "zh-TW"];
 
 export interface AppSettings {
   theme: Theme;

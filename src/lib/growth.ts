@@ -278,7 +278,8 @@ export async function sendInterviewMessage(
     { role: "user", content: userMessage.trim() || INTERVIEW_KICKOFF },
   ];
 
-  const raw = await requestChatCompletion(character.llmProfileId, messages, {
+  const raw = await requestChatCompletion(character.llmRef, messages, {
+    task: "growth", reasoningEffort: character.reasoningEffort,
     onDelta: options?.onDelta
       ? (_delta, full) => options.onDelta?.(stripPatchBlocks(full))
       : undefined,
@@ -306,7 +307,7 @@ export async function growFromConversation(
     { role: "user", content: transcript || "(会話なし)" },
   ];
 
-  const raw = await requestChatCompletion(character.llmProfileId, messages);
+  const raw = await requestChatCompletion(character.llmRef, messages, { task: "growth", reasoningEffort: character.reasoningEffort });
   const result = applyPatchResult(character, raw);
   return { patch: result.patch, character: result.character, changed: result.changed };
 }
@@ -375,7 +376,7 @@ export async function autoFillCharacterSheet(character: Character): Promise<Auto
     { role: "system", content: buildAutoFillSystemPrompt(character.sheet, getWorld(character.worldId)) },
     { role: "user", content: AUTO_FILL_KICKOFF },
   ];
-  const raw = await requestChatCompletion(character.llmProfileId, messages);
+  const raw = await requestChatCompletion(character.llmRef, messages, { task: "growth", reasoningEffort: character.reasoningEffort });
   const result = applyPatchResult(character, raw);
   return { patch: result.patch, character: result.character, changed: result.changed };
 }
@@ -438,7 +439,7 @@ export async function improveCharacterSheetField(
     { role: "system", content: buildFieldImproveSystemPrompt(character.sheet, field, getWorld(character.worldId)) },
     { role: "user", content: `「${FIELD_LABELS[field]}」をより良くしてください。` },
   ];
-  const raw = await requestChatCompletion(character.llmProfileId, messages);
+  const raw = await requestChatCompletion(character.llmRef, messages, { task: "growth", reasoningEffort: character.reasoningEffort });
   const result = applyPatchResult(character, raw);
   return { patch: result.patch, character: result.character, changed: result.changed };
 }
