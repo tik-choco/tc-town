@@ -1,5 +1,6 @@
 import { roomIdFromBaseUrl, networkVoiceModelParam } from '@tik-choco/mistai/llm-config';
 import { rooms } from './network';
+import { isTtsSpeed, isTtsResponseFormat, type TtsOptions } from '@tik-choco/mistai';
 // Voice call media I/O: OpenAI-compatible TTS ("{baseUrl}/audio/speech") and
 // STT ("{baseUrl}/audio/transcriptions") against a resolved voice target (the
 // shape lib/llmConfig.ts's resolveVoice() returns — baseUrl/apiKey/model
@@ -61,10 +62,14 @@ async function readErrorDetail(response: Response): Promise<string> {
 export async function synthesizeSpeech(
   profile: VoiceTarget,
   text: string,
-  options?: { voice?: string; lang?: string; signal?: AbortSignal },
+  options?: TtsOptions & { voice?: string; lang?: string; signal?: AbortSignal },
 ): Promise<Blob> {
   const room = roomIdFromBaseUrl(profile.baseUrl);
-  if (room) return rooms.requestRoomTts(room, { text, model: networkVoiceModelParam(profile.model), voice: options?.voice || profile.voice || undefined, lang: options?.lang });
+  if (room) return rooms.requestRoomTts(room, { text, model: networkVoiceModelParam(profile.model), voice: options?.voice || profile.voice || undefined, lang: options?.lang,
+    ...(options?.speed !== undefined ? { speed: options.speed } : {}),
+    ...(options?.responseFormat !== undefined ? { responseFormat: options.responseFormat } : {}),
+  });
+  const speed = options?.speed ?? profile.speed;
   const url = endpointUrl(profile.baseUrl, "/audio/speech");
   const response = await fetch(url, {
     method: "POST",
@@ -75,7 +80,8 @@ export async function synthesizeSpeech(
       ...(options?.voice || profile.voice ? { voice: options?.voice || profile.voice } : {}),
       ...(options?.lang ? { lang: options.lang } : {}),
       input: text,
-      speed: profile.speed ?? 1,
+      ...(isTtsSpeed(speed) ? { speed } : {}),
+      ...(isTtsResponseFormat(options?.responseFormat) ? { response_format: options.responseFormat } : {}),
     }),
   });
   if (!response.ok) {
