@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { emptyLlmConfig, loadLlmConfig, saveLlmConfig, resolveModel } from '@tik-choco/mistai/llm-config';
+import { emptyLlmConfig, loadLlmConfig, saveLlmConfig, resolveModel, resolveVoice } from '@tik-choco/mistai/llm-config';
 import { loadProviderSettings, migrateLegacyProviderSettingsToShared, saveProviderSettings, SETTINGS_KEY } from './llmSettings';
 import { requestChatCompletion } from './llm';
 import { synthesizeSpeech, transcribeAudio } from './voice';
@@ -25,6 +25,28 @@ function seed() {
   return config;
 }
 describe('provider-room integration', () => {
+  it('uses resolved shared TTS speed, caller overrides, format hints and the real response MIME', async () => {
+    const config = seed();
+    config.tts = { providerId: 'http', model: 'speech', voice: 'saved', speed: 1.5 }; saveLlmConfig(config);
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response('audio', { headers: { 'Content-Type': 'audio/ogg' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const target = resolveVoice(loadLlmConfig()!, 'tts')!;
+    expect((await synthesizeSpeech(target, 'Hello')).type).toBe('audio/ogg');
+    await synthesizeSpeech(target, 'Hello', { speed: 0.75, responseFormat: 'wav' });
+    await synthesizeSpeech({ ...target, speed: undefined }, 'Hello', { speed: NaN, responseFormat: 'unknown' });
+    const bodies = fetchMock.mock.calls.map(call => JSON.parse(call[1]!.body as string));
+    expect(bodies[0].speed).toBe(1.5); expect(bodies[0]).not.toHaveProperty('response_format');
+    expect(bodies[1]).toMatchObject({ speed: 0.75, response_format: 'wav' });
+    expect(bodies[2]).not.toHaveProperty('speed'); expect(bodies[2]).not.toHaveProperty('response_format');
+  });
+  it('delegates room speed defaults to mistai and forwards explicit caller hints', async () => {
+    const target = { baseUrl: 'mist-network://voice-room', apiKey: '', model: 'speech', speed: 1.5 };
+    mocks.tts.mockResolvedValue(new Blob(['audio'], { type: 'audio/ogg' }));
+    expect((await synthesizeSpeech(target, 'Hello', { speed: 0.75, responseFormat: 'wav' })).type).toBe('audio/ogg');
+    expect(mocks.tts).toHaveBeenCalledWith('voice-room', { text: 'Hello', model: 'speech', voice: undefined, lang: undefined, speed: 0.75, responseFormat: 'wav' });
+    await synthesizeSpeech(target, 'Hello');
+    expect(mocks.tts.mock.calls[1][1]).not.toHaveProperty('speed');
+  });
   it('migrates shared, task, character and providing data once without editing legacy fields', () => {
     const old = seed();
     localStorage.setItem('tc-town:characters', JSON.stringify([{ id: 'c', sheet: { name: 'C' }, llmProfileId: 'old' }]));

@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import { LlmSettings } from '@tik-choco/mistai/preact';
-import { emptyLlmConfig, loadLlmConfig, saveLlmConfig } from '@tik-choco/mistai/llm-config';
+import { LlmSettings, Switch } from '@tik-choco/mistai/preact';
 import { useAppSettings } from '../hooks/useAppSettings';
 import { LANGUAGES, type Language, type Theme } from '../lib/appSettings';
 import { requestOnboarding } from '../lib/onboarding';
@@ -49,10 +48,9 @@ export function SettingsView() {
       extraSections={tab => tab === 'tasks' ? <section class="tc-ai-extra">
         <label class="tc-field"><span>{t.expression}</span><select value={settings.expressionMode} onChange={e => { update({ expressionMode: e.currentTarget.value as ProviderSettings['expressionMode'] }); setExpression(getExpressionFeatureStatus()); }}>{EXPRESSION_MODES.map(mode => <option value={mode}>{t[mode]}</option>)}</select></label>
         <p class="tc-hint">{t.expressionState}: {expression.mode === 'off' ? t.off : expression.autoDisabled ? t.slow : t.active} · {t.samples}: {expression.sampleCount} · {t.latency}: {expression.avgLatencyMs}ms</p>
-        <label class="tc-field"><span>{t.speed}</span><input type="number" min="0.25" max="4" step="0.05" defaultValue={(loadLlmConfig() ?? emptyLlmConfig()).tts?.speed ?? 1} onChange={e => { const cfg = loadLlmConfig() ?? emptyLlmConfig(); if (cfg.tts) { cfg.tts.speed = Math.min(4, Math.max(0.25, Number(e.currentTarget.value) || 1)); saveLlmConfig(cfg); } }} /></label>
         <label class="tc-field"><span>{t.silence}</span><input type="number" min="0" max="5" step="0.1" value={settings.sttSilenceDuration} onChange={e => update({ sttSilenceDuration: Math.max(0, Number(e.currentTarget.value) || 0) })} /></label>
         <label class="tc-field"><span>{t.threshold}</span><input type="number" min="0" max="0.5" step="0.005" value={settings.micThreshold} onChange={e => update({ micThreshold: Math.min(0.5, Math.max(0, Number(e.currentTarget.value) || 0)) })} /></label>
-        <label class="tc-role-head"><input type="checkbox" checked={settings.bargeInEnabled} onChange={e => update({ bargeInEnabled: e.currentTarget.checked })} /><span>{t.barge}</span></label>
+        <div class="tc-role-head"><Switch checked={settings.bargeInEnabled} label={t.barge} onChange={bargeInEnabled => update({ bargeInEnabled })} /><span>{t.barge}</span></div>
       </section> : null} />}
   </div></div>;
 }

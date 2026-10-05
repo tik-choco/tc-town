@@ -264,17 +264,9 @@
   gap: var(--space-3);
   cursor: pointer;
   /* Let the long Japanese role description wrap to its own full-width
-     line under the checkbox+icon on narrow screens rather than being
+     line under the switch+icon on narrow screens rather than being
      flex-shrunk toward per-character width. */
   flex-wrap: wrap;
-}
-
-.tc-role-head input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
-  flex: none;
-  accent-color: var(--accent);
-  cursor: pointer;
 }
 
 .tc-role-title {
