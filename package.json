@@ -5,12 +5,9 @@
   "license": "MPL-2.0",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/fetch-mistlib.mjs",
     "dev": "vite --host",
-    "prebuild": "node scripts/fetch-mistlib.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host",
-    "fetch-mistlib": "node scripts/fetch-mistlib.mjs",
     "test": "vitest run"
   },
   "dependencies": {
@@ -18,6 +15,7 @@
     "@pixiv/three-vrm-animation": "^3.5.4",
     "@tik-choco/mistai": "github:tik-choco-lab/mistai",
     "@tik-choco/mistlib": "0.6.6",
+    "@tik-choco/mistlib-web": "0.1.0",
     "lucide-preact": "^1.16.0",
     "preact": "^10.29.3",
     "three": "^0.180.0"

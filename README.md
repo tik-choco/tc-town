@@ -38,16 +38,9 @@ npm test         # テスト（vitest）
 
 ### mistlib（AI Network）の取得
 
-`npm run dev` / `npm run build` の前段（predev / prebuild）で `scripts/fetch-mistlib.mjs` が実行され、mistlib のソースを取得して wasm をベンダリングします。取得先は `.env` で指定します。
+エンジンは `@tik-choco/mistlib`、JS ラッパーは `@tik-choco/mistlib-web` を npm から取得します。通常のビルドに追加設定や Rust ツールチェーンは不要です。
 
-```bash
-cp .env.example .env
-```
-
-| 変数 | 説明 | 既定 |
-| --- | --- | --- |
-| `MISTLIB_REPO` | mistlib のリポジトリ（`git@github.com:<org>/<repo>.git`） | （必須） |
-| `MISTLIB_REF` | 取得するブランチ／タグ／コミット | `develop` |
+ローカルでエンジンを開発する場合は、`.env.example` を参考に `.env` の `MISTLIB_LOCAL` を wasm ビルド出力先へ設定してください。Vite（dev/build/vitest）の参照先だけが切り替わり、`tsc` は npm パッケージの型を使用します。
 
 ## ディレクトリ構成
 
