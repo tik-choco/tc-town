@@ -17,6 +17,7 @@ export const DELIVERY_UNRELIABLE: number;
 export const DEFAULT_SIGNALING_URL: string;
 export const DEFAULT_NOSTR_RELAY_URL: string;
 export function defaultConfig(): Record<string, unknown>;
+export function getVersion(): Promise<string>;
 
 export function storage_add(name: string, data: Uint8Array): Promise<string>;
 export function storage_get(rootCid: string): Promise<Uint8Array>;

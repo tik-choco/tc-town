@@ -20,15 +20,26 @@ export default defineConfig(({ mode }) => {
   // MISTLIB_LOCAL is build-time config that must never reach client code.
   const localEngine = loadEnv(mode, process.cwd(), '').MISTLIB_LOCAL
   const alias: Record<string, string> = {}
+  let localEnginePath: string | undefined
   if (localEngine) {
-    alias['@tik-choco/mistlib'] = path.resolve(process.cwd(), localEngine)
-    console.log(`vite: using local mist engine at ${alias['@tik-choco/mistlib']}`)
+    localEnginePath = path.resolve(process.cwd(), localEngine)
+    alias['@tik-choco/mistlib'] = localEnginePath
+    console.log(`vite: using local mist engine at ${localEnginePath}`)
   }
 
   return {
   base: process.env.VITE_BASE_PATH || '/',
   plugins: [preact()],
   resolve: { alias },
+  // The dev server refuses to serve files outside the project root
+  // (server.fs.allow) — and the local engine lives outside it. Widen the
+  // allow list to exactly the aliased pkg dir (plus the project root) only
+  // while MISTLIB_LOCAL is active; the production build is unaffected.
+  server: {
+    fs: {
+      allow: localEnginePath ? [process.cwd(), localEnginePath] : undefined,
+    },
+  },
   test: {
     // Vitest's default excludes don't cover dotfolders like .claude/ — without
     // this, `npm test` from the repo root also picks up and re-runs every

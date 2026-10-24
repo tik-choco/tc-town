@@ -5,6 +5,8 @@ on:
     branches:
       - main
   workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * *'
 
 concurrency:
   group: pages
@@ -36,6 +38,23 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Always ship the latest mistlib engine and its matching JS wrapper without
+      # changing package files. The version is read from the installed
+      # package.json rather than `npm ls`, which exits non-zero once latest no
+      # longer matches the pin in package.json. The type-check in the build step
+      # gates deployment: API breaks fail the build and the previous Pages
+      # deploy stays live.
+      - name: Install latest mistlib
+        run: |
+          npm install --no-save @tik-choco/mistlib@latest
+          node -p "'@tik-choco/mistlib ' + JSON.parse(require('fs').readFileSync('node_modules/@tik-choco/mistlib/package.json', 'utf8')).version"
+
+      - name: Refresh mistlib wrapper
+        env:
+          MISTLIB_EXAMPLES_REPO: https://github.com/tik-choco-lab/mistlib-examples.git
+          MISTLIB_EXAMPLES_REF: main
+        run: node scripts/fetch-mistlib.mjs
 
       - name: Build
         # src/vendor/mistlib is committed (built wasm output), so this runs
