@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { RoomProviderService, decode, encode } from '@tik-choco/mistai';
+import { RoomProviderService, decode, encode, EVENT_RAW } from '@tik-choco/mistai';
 import { emptyLlmConfig, saveLlmConfig } from '@tik-choco/mistai/llm-config';
 const mock = vi.hoisted(() => ({ init: vi.fn(), join: vi.fn(async (_room: string) => {}), leave: vi.fn(), send: vi.fn(), handler: undefined as undefined | ((event: number, from: string, payload: unknown, room: string) => void) }));
 vi.mock('./mistClient', () => ({ NODE_ID_STORAGE_KEY: 'test-node', getNode: async () => { mock.init(); return { joinRoomAsync: mock.join, leaveRoom: mock.leave, sendMessage: mock.send }; }, subscribeEvent: (handler: typeof mock.handler) => { mock.handler = handler; return () => {}; } }));
@@ -23,7 +23,7 @@ it('keeps rooms isolated and carries streaming chat effort through the consumer 
     const hellos = mock.send.mock.calls.map(call => ({ message: decode(call[1]), room: call[3] })).filter(call => call.message?.type === 'provider_hello');
     expect(hellos.some(call => call.room === 'a' && call.message?.type === 'provider_hello' && call.message.models?.join() === 'one')).toBe(true);
     expect(hellos.some(call => call.room === 'b' && call.message?.type === 'provider_hello' && call.message.models?.join() === 'two')).toBe(true);
-    mock.handler!(0, 'remote-a', encode({ v: 1, type: 'provider_hello', models: ['only-a'] }), 'a');
+    mock.handler!(EVENT_RAW, 'remote-a', encode({ v: 1, type: 'provider_hello', models: ['only-a'] }), 'a');
     const a = rooms.roomConsumer('a').status, b = rooms.roomConsumer('b').status;
     expect(a.phase === 'connected' ? a.models : []).toContain('only-a'); expect(b.phase === 'connected' ? b.models ?? [] : []).not.toContain('only-a');
 
@@ -37,18 +37,18 @@ it('keeps rooms isolated and carries streaming chat effort through the consumer 
     expect(request).toMatchObject({ model: 'only-a', reasoning_effort: 'max', messages: [{ role: 'user', content: 'Test' }] });
     expect(request).not.toHaveProperty('temperature');
     expect(mock.send.mock.calls.some(call => decode(call[1])?.type === 'oai_request')).toBe(false);
-    mock.handler!(0, 'remote-a', encode({ v: 1, type: 'llm_response_chunk', id: request.id, delta: 'Ro', seq: 0 }), 'a');
+    mock.handler!(EVENT_RAW, 'remote-a', encode({ v: 1, type: 'llm_response_chunk', id: request.id, delta: 'Ro', seq: 0 }), 'a');
     expect(onDelta.mock.calls).toEqual([['Ro', 'Ro']]);
-    mock.handler!(0, 'remote-a', encode({ v: 1, type: 'llm_response_chunk', id: request.id, delta: 'om', seq: 1 }), 'a');
+    mock.handler!(EVENT_RAW, 'remote-a', encode({ v: 1, type: 'llm_response_chunk', id: request.id, delta: 'om', seq: 1 }), 'a');
     expect(onDelta.mock.calls).toEqual([['Ro', 'Ro'], ['om', 'Room']]);
-    mock.handler!(0, 'remote-a', encode({ v: 1, type: 'llm_response_done', id: request.id }), 'a');
+    mock.handler!(EVENT_RAW, 'remote-a', encode({ v: 1, type: 'llm_response_done', id: request.id }), 'a');
     expect(await reply).toBe('Room');
 
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ choices: [{ message: { content: 'Provided' } }] }), { headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);
     for (const inboundEffort of ['xhigh', 'none', undefined]) {
       const id = `inbound-${inboundEffort}`;
-      mock.handler!(0, 'remote-b', encode({ v: 1, type: 'llm_request', id, model: 'two', messages: [{ role: 'user', content: 'Test' }], ...(inboundEffort !== undefined ? { reasoning_effort: inboundEffort } : {}) }), 'b');
+      mock.handler!(EVENT_RAW, 'remote-b', encode({ v: 1, type: 'llm_request', id, model: 'two', messages: [{ role: 'user', content: 'Test' }], ...(inboundEffort !== undefined ? { reasoning_effort: inboundEffort } : {}) }), 'b');
       await vi.waitFor(() => expect(mock.send.mock.calls.some(call => {
         const message = decode(call[1]);
         return call[3] === 'b' && message?.type === 'llm_response_done' && message.id === id;
@@ -57,6 +57,17 @@ it('keeps rooms isolated and carries streaming chat effort through the consumer 
       expect(body).toMatchObject({ model: 'two', reasoning_effort: inboundEffort ?? 'low' });
       expect(body).not.toHaveProperty('temperature');
     }
+    const sendsBeforePeer = mock.send.mock.calls.length;
+    // Use WASM event codes directly to catch incorrect constant mappings.
+    mock.handler!(5, 'new-peer', new TextEncoder().encode('entered'), '');
+    expect(mock.send).toHaveBeenCalledTimes(sendsBeforePeer);
+    mock.handler!(2, 'new-peer', new TextEncoder().encode('joined'), '');
+    expect(mock.send.mock.calls.slice(sendsBeforePeer).some(call => call[0] === 'new-peer' && decode(call[1])?.type === 'consumer_hello')).toBe(true);
+    mock.handler!(6, 'remote-a', new TextEncoder().encode('left'), '');
+    expect(rooms.roomConsumer('a').status.phase).toBe('connected');
+    mock.handler!(3, 'remote-a', new TextEncoder().encode('left'), '');
+    expect(rooms.roomConsumer('a').status.phase).toBe('searching');
+
     rooms.disconnectRoom('a'); expect(mock.leave).not.toHaveBeenCalled();
     service.update({ config, roomProvide: { ...providing, a: { ...providing.a, enabled: false } }, consumers: rooms });
     expect(mock.leave).toHaveBeenCalledWith('a'); expect(mock.leave).not.toHaveBeenCalledWith('b');

@@ -47,7 +47,11 @@ jobs:
       # stays live.
       - name: Install latest mistlib
         run: |
-          npm install --no-save @tik-choco/mistlib@latest @tik-choco/mistlib-web@latest
+          # The wrapper declares the engine version it supports as a peer
+          # dependency, so pair the latest wrapper with that engine instead of
+          # engine@latest (which fails to resolve once the engine is ahead).
+          peer=$(npm view @tik-choco/mistlib-web@latest 'peerDependencies.@tik-choco/mistlib')
+          npm install --no-save @tik-choco/mistlib-web@latest "@tik-choco/mistlib@${peer:-latest}"
           node -e "for (const p of ['@tik-choco/mistlib', '@tik-choco/mistlib-web']) console.log(p, JSON.parse(require('fs').readFileSync('node_modules/' + p + '/package.json', 'utf8')).version)"
 
       - name: Build

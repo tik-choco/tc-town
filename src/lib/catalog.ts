@@ -372,7 +372,7 @@ export async function connectCatalog(): Promise<void> {
   return connectPromise;
 }
 
-/** Leaves the catalog room (never the parameterless leaveRoom() — that would tear down the whole shared node). No-op if never connected. */
+/** Leaves only the catalog room, keeping the shared node active. No-op if never connected. */
 export function disconnectCatalog(): void {
   if (unsubscribeEvent) {
     unsubscribeEvent();

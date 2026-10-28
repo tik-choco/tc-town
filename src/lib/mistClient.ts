@@ -1,7 +1,7 @@
 // Thin singleton wrapper around the npm package @tik-choco/mistlib-web.
 // It only supports one active MistNode per page (it throws if a second
 // MistNode instance calls init() while another is still active, and a
-// node's own parameterless leaveRoom() fully deinitializes it), and its
+// node's leaveAllRooms() fully deinitializes it), and its
 // node.onEvent()/onMediaEvent() each accept a single handler that replaces
 // any previous one — so this module owns the one real MistNode instance and
 // re-broadcasts events to any number of listeners registered via
